@@ -1,0 +1,235 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Enum untuk role user (tanpa tabel terpisah)
+enum Role {
+  MEMBER
+  VERIFIER
+  ADMIN // Opsional, jika masih diperlukan
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  DISABLED
+}
+
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CertificateStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+model User {
+  id              String   @id @default(uuid())
+  
+  displayName     String?
+  passwordHash    String
+
+  phoneNumber     String?  @unique
+  phoneVerifiedAt DateTime?
+
+  email           String   @unique
+  emailVerifiedAt DateTime?
+
+  status          UserStatus @default(ACTIVE)
+  role            Role       @default(MEMBER) 
+
+  lastLoginAt     DateTime?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?  
+
+  identity        Identity?
+  certificates    Certificate[]
+
+  ownedDocuments  Document[]      // Dokumen yang dibuat user (pemilik)
+  documentSigners DocumentSigner[] // Relasi ke peran penandatangan
+  signatures      Signature[]     // Tanda tangan yang dilakukan user
+
+  @@map("users")
+}
+
+model Identity {
+  id             String @id @default(uuid())
+  userId         String @unique
+  nik            String @unique
+  fullName       String
+  birthPlace     String?
+  birthDate      DateTime
+  address        String
+  status         VerificationStatus @default(PENDING)
+
+  verifiedBy     String?
+  verifiedAt     DateTime?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("identities")
+}
+
+model Certificate {
+  id              String   @id @default(uuid())
+
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // PKCS#12 bundle
+  p12Data         Bytes
+  p12PasswordEnc  String   // password terenkripsi
+
+  // Metadata sertifikat
+  subjectDN       String
+  issuerDN        String?
+  serialNumber    String
+
+  notBefore       DateTime
+  notAfter        DateTime
+
+  status          CertificateStatus @default(ACTIVE)
+  isActive        Boolean @default(true)
+
+  revokedAt       DateTime?
+
+  signatures      Signature[]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("certificates")
+}
+
+model EmailVerification {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  otp       String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  verified  Boolean  @default(false)
+
+  @@map("email_verifications")
+}
+
+enum DocumentStatus {
+  DRAFT               // Dokumen awal, belum ada tanda tangan
+  PENDING_SIGNATURES   // Menunggu tanda tangan
+  PARTIALLY_SIGNED     // Sebagian sudah menandatangani
+  FULLY_SIGNED         // Semua pihak telah menandatangani
+  REVOKED              // Dibatalkan
+}
+
+enum SignerStatus {
+  PENDING   // Belum menandatangani
+  SIGNED    // Sudah menandatangani
+  DECLINED  // Menolak menandatangani
+}
+
+model Document {
+  id                  String          @id @default(uuid())
+
+  // Pemilik/pembuat dokumen (opsional)
+  userId              String?
+  user                User?           @relation(fields: [userId], references: [id])
+
+  // Informasi file asli (sebelum ada tanda tangan)
+  originalFileName    String?          // Nama file asli
+  originalFileHash    String?          // SHA-256 file asli
+  originalFileSize    Int?             // Ukuran file asli (bytes)
+
+  // Informasi file final (setelah semua tanda tangan)
+  finalFileName       String?          // Nama file hasil akhir
+  finalFileHash       String?          // SHA-256 file final
+  finalFileSize       Int?             // Ukuran file final
+  finalFileIpfsHash   String?          // Jika disimpan di IPFS
+
+
+  status              DocumentStatus  @default(DRAFT)
+
+  // Relasi ke daftar penandatangan yang diwajibkan
+  requiredSigners     DocumentSigner[]
+  // Relasi ke semua peristiwa tanda tangan
+  signatures          Signature[]
+
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  @@map("documents")
+}
+
+model DocumentSigner {
+  id                  String         @id @default(uuid())
+  documentId          String
+  document            Document       @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  userId              String
+  user                User           @relation(fields: [userId], references: [id])
+
+  status              SignerStatus   @default(PENDING)
+  signedAt            DateTime?      // Waktu saat menandatangani
+  signatureId         String?        @unique // Jika sudah signed, tautkan ke Signature
+  signature           Signature?     @relation(fields: [signatureId], references: [id])
+
+  // Urutan tanda tangan (misal: 1,2,3) – opsional jika berurutan
+  order               Int?
+
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  @@unique([documentId, userId]) // Satu user hanya boleh satu kali dalam satu dokumen
+  @@map("document_signers")
+}
+
+model Signature {
+  id                  String         @id @default(uuid())
+  documentId          String
+  document            Document       @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  signerId            String
+  signer              User           @relation(fields: [signerId], references: [id])
+  certificateId       String?        // Sertifikat yang digunakan (jika perlu)
+  certificate         Certificate?   @relation(fields: [certificateId], references: [id])
+
+  // Waktu tanda tangan
+  signedAt            DateTime       @default(now())
+  // Hash dokumen setelah tanda tangan ini (untuk menyimpan versi intermediate)
+  signedFileHash      String?        // SHA-256 file setelah tanda tangan ini
+  signedFileIpfsHash  String?        // Jika disimpan di IPFS
+  // Hash yang dicatat di blockchain (biasanya hash dari file final atau hash khusus)
+  documentHash        String         // Hash yang dikirim ke blockchain
+  blockchainTxHash    String?        // Hash transaksi di Hyperledger Besu
+
+  // Urutan tanda tangan
+  order               Int            @default(0)
+
+   documentSigner      DocumentSigner? 
+
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  @@unique([documentId, order]) // Setiap dokumen memiliki urutan unik
+  @@map("signatures")
+}
