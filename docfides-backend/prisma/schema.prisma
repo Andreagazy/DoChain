@@ -81,6 +81,12 @@ model Identity {
   birthPlace     String?
   birthDate      DateTime
   address        String
+  ktpOriginalFileName String?
+  ktpStoredFileName   String?
+  ktpStoragePath      String?
+  ktpMimeType         String?
+  ktpSizeBytes        Int?
+  ktpUploadedAt       DateTime?
   status         VerificationStatus @default(PENDING)
 
   verifiedBy     String?
@@ -126,12 +132,19 @@ model Certificate {
 }
 
 model EmailVerification {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  otp       String
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-  verified  Boolean  @default(false)
+  id               String   @id @default(uuid())
+  email            String   @unique
+  otp              String
+  expiresAt        DateTime
+  createdAt        DateTime @default(now())
+  verified         Boolean  @default(false)
+  
+  // Rate limiting fields
+  attemptCount     Int      @default(0)      // Jumlah attempt verify OTP
+  lastAttemptAt    DateTime?                 // Waktu attempt terakhir
+  isLocked         Boolean  @default(false)  // Locked karena terlalu banyak attempt
+  lockedUntil      DateTime?                 // Unlock waktu
+  lastRequestAt    DateTime?                 // Waktu request OTP terakhir
 
   @@map("email_verifications")
 }
