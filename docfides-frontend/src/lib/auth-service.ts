@@ -15,6 +15,7 @@ import {
     CertificationEligibilityResponse,
     StartCertificationResponse,
     UploadSignatureResponse,
+    SignaturePreferenceResponse,
     SignatureStatusResponse,
     SignDocumentPayload,
     SignDocumentResponse,
@@ -24,6 +25,7 @@ import {
     OwnedDocumentsResponse,
     AssignedDocumentsResponse,
     SignerCandidatesResponse,
+    DocumentSignerPlaceholdersResponse,
 } from '@/types/auth';
 
 /**
@@ -173,6 +175,17 @@ export const uploadSignatureImage = async (
     return response.data;
 };
 
+export const updateSignaturePreference = async (
+    mode: 'visible' | 'invisible',
+): Promise<SignaturePreferenceResponse> => {
+    const response = await api.patch<SignaturePreferenceResponse>(
+        '/certification/signature/preference',
+        { mode },
+    );
+
+    return response.data;
+};
+
 export const getSignatureStatus = async (): Promise<SignatureStatusResponse> => {
     const response = await api.get<SignatureStatusResponse>('/certification/signature/me');
     return response.data;
@@ -254,6 +267,15 @@ export const requestDocumentSigners = async (
     const response = await api.post<RequestSignersResponse>(
         `/certification/documents/${documentId}/request-signers`,
         payload,
+    );
+    return response.data;
+};
+
+export const getDocumentSignerPlaceholders = async (
+    documentId: string,
+): Promise<DocumentSignerPlaceholdersResponse> => {
+    const response = await api.get<DocumentSignerPlaceholdersResponse>(
+        `/certification/documents/${documentId}/placeholders`,
     );
     return response.data;
 };

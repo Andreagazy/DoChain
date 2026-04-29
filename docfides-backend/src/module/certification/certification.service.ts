@@ -8,6 +8,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  unlinkSync,
   writeFileSync,
 } from 'fs';
 import { extname, resolve } from 'path';
@@ -23,9 +24,39 @@ import { pdflibAddPlaceholder } from '@signpdf/placeholder-pdf-lib';
 import { plainAddPlaceholder } from '@signpdf/placeholder-plain';
 import signpdf from '@signpdf/signpdf';
 import { P12Signer } from '@signpdf/signer-p12';
+import { SignaturePreference } from '../../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SignDocumentDto, SignatureMode } from './dto/sign-document.dto';
 import { RequestSignersDto } from './dto/request-signers.dto';
+import { UpdateSignaturePreferenceDto } from './dto/update-signature-preference.dto';
+
+type SignerPlaceholderConfig = {
+  visiblePage: number | null;
+  visibleX: number | null;
+  visibleY: number | null;
+  visibleWidth: number | null;
+  visibleHeight: number | null;
+};
+
+type SignerMembershipForSign = {
+  status: string;
+  order: number | null;
+} & SignerPlaceholderConfig;
+
+type SignDocumentQueryResult = {
+  id: string;
+  userId: string | null;
+  status: string;
+  originalFileName: string | null;
+  originalFileHash: string | null;
+  finalFileName: string | null;
+  finalFileHash: string | null;
+  _count: {
+    requiredSigners: number;
+    signatures: number;
+  };
+  requiredSigners: SignerMembershipForSign[];
+};
 
 @Injectable()
 export class CertificationService {
@@ -211,6 +242,67 @@ export class CertificationService {
     return this.getDocumentFileByVariant(userId, documentId, 'signed');
   }
 
+  async getSignerPlaceholders(userId: string, documentId: string) {
+    const document = await this.prisma.document.findUnique({
+      where: { id: documentId },
+      select: {
+        id: true,
+        userId: true,
+      },
+    });
+
+    if (!document) {
+      throw new NotFoundException('Dokumen tidak ditemukan');
+    }
+
+    if (document.userId !== userId) {
+      throw new BadRequestException(
+        'Hanya pemilik dokumen yang dapat melihat placeholder signer',
+      );
+    }
+
+    const signers = await this.prisma.documentSigner.findMany({
+      where: {
+        documentId,
+      },
+      orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+      select: {
+        userId: true,
+        order: true,
+        status: true,
+        visiblePage: true,
+        visibleX: true,
+        visibleY: true,
+        visibleWidth: true,
+        visibleHeight: true,
+        user: {
+          select: {
+            email: true,
+            displayName: true,
+          },
+        },
+      },
+    });
+
+    return {
+      documentId,
+      signers: signers.map((item) => ({
+        userId: item.userId,
+        order: item.order,
+        status: item.status,
+        email: item.user?.email ?? null,
+        displayName: item.user?.displayName ?? null,
+        placeholder: {
+          visiblePage: item.visiblePage,
+          visibleX: item.visibleX,
+          visibleY: item.visibleY,
+          visibleWidth: item.visibleWidth,
+          visibleHeight: item.visibleHeight,
+        },
+      })),
+    };
+  }
+
   private async getDocumentFileByVariant(
     userId: string,
     documentId: string,
@@ -308,20 +400,32 @@ export class CertificationService {
         id: true,
         email: true,
         displayName: true,
+        preferredSignatureMode: true,
       },
     });
 
     return {
-      signers: users,
+      signers: users.map((user) => ({
+        id: user.id,
+        email: user.email,
+        displayName: user.displayName,
+        preferredSignatureMode: user.preferredSignatureMode.toLowerCase(),
+      })),
     };
   }
 
-  getSignatureStatus(userId: string) {
+  async getSignatureStatus(userId: string) {
     const signaturePath = this.resolveSignatureImagePath(userId);
+    const profile = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { preferredSignatureMode: true },
+    });
+    const preferredMode = profile?.preferredSignatureMode ?? 'INVISIBLE';
     if (!signaturePath) {
       return {
         hasSignature: false,
         signature: null,
+        preferredSignatureMode: preferredMode.toLowerCase(),
       };
     }
 
@@ -331,6 +435,36 @@ export class CertificationService {
         fileName: signaturePath.split(/[\\/]/).pop() ?? null,
         storagePath: signaturePath,
       },
+      preferredSignatureMode: preferredMode.toLowerCase(),
+    };
+  }
+
+  async updateSignaturePreference(
+    userId: string,
+    dto: UpdateSignaturePreferenceDto,
+  ) {
+    const preferredSignatureMode =
+      dto.mode === 'visible'
+        ? SignaturePreference.VISIBLE
+        : SignaturePreference.INVISIBLE;
+
+    const updated = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        preferredSignatureMode,
+      },
+      select: {
+        id: true,
+        preferredSignatureMode: true,
+        updatedAt: true,
+      },
+    });
+
+    return {
+      message: 'Preferensi signature berhasil disimpan',
+      userId: updated.id,
+      preferredSignatureMode: updated.preferredSignatureMode.toLowerCase(),
+      updatedAt: updated.updatedAt,
     };
   }
 
@@ -345,6 +479,8 @@ export class CertificationService {
         id: true,
         userId: true,
         status: true,
+        originalFileName: true,
+        originalFileHash: true,
       },
     });
 
@@ -372,6 +508,30 @@ export class CertificationService {
       throw new BadRequestException('Daftar signer tidak boleh kosong');
     }
 
+    const placeholderMap = new Map<string, SignerPlaceholderConfig>();
+
+    for (const item of dto.placeholders ?? []) {
+      if (!signerIds.includes(item.signerUserId)) {
+        throw new BadRequestException(
+          `Placeholder signer tidak valid: ${item.signerUserId}`,
+        );
+      }
+
+      if (placeholderMap.has(item.signerUserId)) {
+        throw new BadRequestException(
+          `Placeholder signer duplikat: ${item.signerUserId}`,
+        );
+      }
+
+      placeholderMap.set(item.signerUserId, {
+        visiblePage: item.visiblePage ?? null,
+        visibleX: item.visibleX ?? null,
+        visibleY: item.visibleY ?? null,
+        visibleWidth: item.visibleWidth ?? null,
+        visibleHeight: item.visibleHeight ?? null,
+      });
+    }
+
     const users = await this.prisma.user.findMany({
       where: {
         id: { in: signerIds },
@@ -386,6 +546,7 @@ export class CertificationService {
         id: true,
         email: true,
         displayName: true,
+        preferredSignatureMode: true,
       },
     });
 
@@ -414,23 +575,41 @@ export class CertificationService {
       existingSigners.map((signer) => [signer.userId, signer]),
     );
 
-    const maxOrder = await this.prisma.documentSigner.aggregate({
-      where: { documentId },
-      _max: { order: true },
-    });
+    const modeByUserId = new Map(
+      users.map((user) => [user.id, user.preferredSignatureMode]),
+    );
 
-    let nextOrder = (maxOrder._max.order ?? 0) + 1;
+    const requestedSignersWithMode = signerIds.map((userId) => ({
+      userId,
+      preferredSignatureMode: (modeByUserId.get(userId) ?? 'INVISIBLE') as
+        | 'VISIBLE'
+        | 'INVISIBLE',
+    }));
 
     const result = await this.prisma.$transaction(async (tx) => {
       const processed = [] as Array<{
         userId: string;
         status: string;
         order: number | null;
-        action: 'invited' | 're-requested' | 'already-exists';
+        action: 'invited' | 're-requested' | 'already-exists' | 'updated';
+        placeholder: SignerPlaceholderConfig;
       }>;
 
-      for (const signerUserId of signerIds) {
+      for (const [index, signerUserId] of signerIds.entries()) {
         const existingSigner = existingByUserId.get(signerUserId);
+        const requestedOrder = index + 1;
+        const preferredMode = modeByUserId.get(signerUserId) ?? 'INVISIBLE';
+
+        if (preferredMode === 'VISIBLE' && !placeholderMap.has(signerUserId)) {
+          throw new BadRequestException(
+            'Signer dengan mode visible wajib memiliki posisi placeholder',
+          );
+        }
+
+        const requestedPlaceholder =
+          preferredMode === 'VISIBLE'
+            ? (placeholderMap.get(signerUserId) ?? this.emptyPlaceholder())
+            : this.emptyPlaceholder();
 
         if (!existingSigner) {
           const created = await tx.documentSigner.create({
@@ -438,7 +617,8 @@ export class CertificationService {
               documentId,
               userId: signerUserId,
               status: 'PENDING',
-              order: nextOrder,
+              order: requestedOrder,
+              ...requestedPlaceholder,
             },
             select: {
               userId: true,
@@ -452,10 +632,18 @@ export class CertificationService {
             status: created.status,
             order: created.order,
             action: 'invited',
+            placeholder: requestedPlaceholder,
           });
-
-          nextOrder += 1;
           continue;
+        }
+
+        if (
+          existingSigner.status === 'SIGNED' &&
+          existingSigner.order !== requestedOrder
+        ) {
+          throw new BadRequestException(
+            'Urutan signer yang sudah SIGNED tidak dapat diubah',
+          );
         }
 
         if (existingSigner.status === 'DECLINED') {
@@ -465,6 +653,8 @@ export class CertificationService {
               status: 'PENDING',
               signedAt: null,
               signatureId: null,
+              order: requestedOrder,
+              ...requestedPlaceholder,
             },
             select: {
               userId: true,
@@ -478,8 +668,33 @@ export class CertificationService {
             status: updated.status,
             order: updated.order,
             action: 're-requested',
+            placeholder: requestedPlaceholder,
           });
 
+          continue;
+        }
+
+        if (existingSigner.status !== 'SIGNED') {
+          const updated = await tx.documentSigner.update({
+            where: { id: existingSigner.id },
+            data: {
+              order: requestedOrder,
+              ...requestedPlaceholder,
+            },
+            select: {
+              userId: true,
+              status: true,
+              order: true,
+            },
+          });
+
+          processed.push({
+            userId: updated.userId,
+            status: updated.status,
+            order: updated.order,
+            action: 'updated',
+            placeholder: requestedPlaceholder,
+          });
           continue;
         }
 
@@ -488,6 +703,7 @@ export class CertificationService {
           status: existingSigner.status,
           order: existingSigner.order,
           action: 'already-exists',
+          placeholder: this.emptyPlaceholder(),
         });
       }
 
@@ -514,6 +730,71 @@ export class CertificationService {
       };
     });
 
+    // Pre-render all visible signature appearances to prevent breaking incremental signing
+    const hasVisibleSigners = requestedSignersWithMode.some(
+      (s) => s.preferredSignatureMode === 'VISIBLE',
+    );
+    if (hasVisibleSigners) {
+      const visibleSignerIds = requestedSignersWithMode
+        .filter((item) => item.preferredSignatureMode === 'VISIBLE')
+        .map((item) => item.userId);
+
+      const missingSignatureImages = visibleSignerIds.filter(
+        (signerUserId) => !this.resolveSignatureImagePath(signerUserId),
+      );
+
+      if (missingSignatureImages.length > 0) {
+        throw new BadRequestException(
+          `Signer visible wajib upload signature image terlebih dahulu: ${missingSignatureImages.join(', ')}`,
+        );
+      }
+
+      const sourceDocumentPath = this.resolveDocumentPath(
+        document.userId ?? requesterUserId,
+        {
+          finalFileName: null,
+          originalFileName: document.originalFileName ?? `${documentId}.pdf`,
+          finalFileHash: null,
+          originalFileHash: document.originalFileHash,
+        },
+      );
+
+      const sourcePdfBuffer = readFileSync(sourceDocumentPath);
+      const preRenderedBuffer = await this.preRenderAllVisibleAppearances(
+        sourcePdfBuffer,
+        documentId,
+        requestedSignersWithMode,
+      );
+
+      if (preRenderedBuffer.length > 0) {
+        // Save pre-rendered version
+        const documentRoot = resolve(
+          process.cwd(),
+          process.env.DOCUMENT_UPLOAD_DIR ?? 'uploads/documents',
+        );
+        const userDir = resolve(
+          documentRoot,
+          document.userId ?? requesterUserId,
+        );
+        mkdirSync(userDir, { recursive: true });
+
+        const preRenderedFileName = `${documentId}-pre-rendered.pdf`;
+        const preRenderedPath = resolve(userDir, preRenderedFileName);
+        writeFileSync(preRenderedPath, preRenderedBuffer);
+
+        const preRenderedHash = this.sha256Hex(preRenderedBuffer);
+
+        // Update document to use pre-rendered version
+        await this.prisma.document.update({
+          where: { id: documentId },
+          data: {
+            finalFileName: preRenderedFileName,
+            finalFileHash: preRenderedHash,
+          },
+        });
+      }
+    }
+
     return {
       message: 'Permintaan tanda tangan berhasil dikirim',
       document: result.document,
@@ -523,9 +804,12 @@ export class CertificationService {
           userId: item.userId,
           email: user?.email ?? null,
           displayName: user?.displayName ?? null,
+          preferredSignatureMode:
+            user?.preferredSignatureMode.toLowerCase() ?? 'invisible',
           status: item.status,
           order: item.order,
           action: item.action,
+          placeholder: item.placeholder,
         };
       }),
     };
@@ -534,6 +818,27 @@ export class CertificationService {
   uploadSignatureImage(userId: string, signatureFile: Express.Multer.File) {
     if (!signatureFile) {
       throw new BadRequestException('File tanda tangan wajib diunggah');
+    }
+
+    const signatureDirectory = resolve(signatureFile.path, '..');
+    const currentSignaturePath = resolve(
+      signatureDirectory,
+      signatureFile.filename,
+    );
+
+    for (const entry of readdirSync(signatureDirectory)) {
+      if (!entry.startsWith(`${userId}-signature`)) {
+        continue;
+      }
+
+      const entryPath = resolve(signatureDirectory, entry);
+      if (entryPath === currentSignaturePath) {
+        continue;
+      }
+
+      if (existsSync(entryPath)) {
+        unlinkSync(entryPath);
+      }
     }
 
     return {
@@ -550,7 +855,7 @@ export class CertificationService {
   }
 
   async getEligibility(userId: string, documentId: string) {
-    const document = await this.prisma.document.findUnique({
+    const document = (await this.prisma.document.findUnique({
       where: {
         id: documentId,
       },
@@ -574,7 +879,7 @@ export class CertificationService {
           },
         },
       },
-    });
+    })) as SignDocumentQueryResult | null;
 
     if (!document) {
       throw new NotFoundException(
@@ -669,6 +974,11 @@ export class CertificationService {
             id: true,
             status: true,
             order: true,
+            visiblePage: true,
+            visibleX: true,
+            visibleY: true,
+            visibleWidth: true,
+            visibleHeight: true,
           },
         },
       },
@@ -686,8 +996,10 @@ export class CertificationService {
       );
     }
 
-    const requiredSignersCount = document._count.requiredSigners;
-    const signerMembership = document.requiredSigners[0] ?? null;
+    const requiredSignersCount = Number(document._count.requiredSigners ?? 0);
+    const signerMembership =
+      (document.requiredSigners[0] as SignerMembershipForSign | undefined) ??
+      null;
     const isOwner = document.userId === userId;
 
     if (requiredSignersCount > 0 && !signerMembership) {
@@ -742,9 +1054,30 @@ export class CertificationService {
     const { p12Data, passphrase, certificateId } =
       await this.getOrCreateCertificate(userId);
 
-    const preparedPdf = this.preparePdfForIncrementalSigning(
-      sourcePdfBuffer,
+    const effectiveSignDto = this.resolveSignPayloadBySigner(
       dto,
+      signerMembership,
+    );
+
+    let sourceBufferForSigning = Buffer.from(sourcePdfBuffer);
+    if (
+      effectiveSignDto.mode === SignatureMode.VISIBLE &&
+      Number(document._count.signatures ?? 0) === 0
+    ) {
+      const signatureImagePath = this.resolveSignatureImagePath(userId);
+      sourceBufferForSigning = Buffer.from(
+        await this.renderVisibleSignatureAppearance(
+          sourcePdfBuffer,
+          effectiveSignDto,
+          signatureImagePath,
+          userId,
+        ),
+      );
+    }
+
+    const preparedPdf = this.preparePdfForIncrementalSigning(
+      sourceBufferForSigning,
+      effectiveSignDto,
       userId,
     );
 
@@ -863,7 +1196,7 @@ export class CertificationService {
 
     return {
       message: 'Dokumen berhasil ditandatangani secara digital',
-      mode: dto.mode,
+      mode: effectiveSignDto.mode,
       signedFile: {
         fileName: signedOutput.fileName,
         storagePath: signedOutput.absolutePath,
@@ -871,6 +1204,34 @@ export class CertificationService {
         sizeBytes: signedOutput.sizeBytes,
       },
       ...transactionResult,
+    };
+  }
+
+  private resolveSignPayloadBySigner(
+    dto: SignDocumentDto,
+    signerMembership: SignerPlaceholderConfig | null,
+  ): SignDocumentDto {
+    if (!signerMembership || dto.mode !== SignatureMode.VISIBLE) {
+      return dto;
+    }
+
+    return {
+      ...dto,
+      visiblePage: signerMembership.visiblePage ?? dto.visiblePage,
+      visibleX: signerMembership.visibleX ?? dto.visibleX,
+      visibleY: signerMembership.visibleY ?? dto.visibleY,
+      visibleWidth: signerMembership.visibleWidth ?? dto.visibleWidth,
+      visibleHeight: signerMembership.visibleHeight ?? dto.visibleHeight,
+    };
+  }
+
+  private emptyPlaceholder(): SignerPlaceholderConfig {
+    return {
+      visiblePage: null,
+      visibleX: null,
+      visibleY: null,
+      visibleWidth: null,
+      visibleHeight: null,
     };
   }
 
@@ -1024,6 +1385,138 @@ export class CertificationService {
 
     const absolutePath = resolve(userDir, fileName);
     return existsSync(absolutePath) ? absolutePath : null;
+  }
+
+  private async renderVisibleSignatureAppearance(
+    sourcePdf: Buffer,
+    dto: SignDocumentDto,
+    signatureImagePath: string | null,
+    userId: string,
+  ): Promise<Buffer> {
+    const pdfDoc = await PDFDocument.load(sourcePdf);
+    const pages = pdfDoc.getPages();
+
+    if (pages.length === 0) {
+      throw new BadRequestException('Dokumen PDF tidak memiliki halaman');
+    }
+
+    const pageIndex = Math.max(0, (dto.visiblePage ?? 1) - 1);
+    const targetPage = pages[Math.min(pageIndex, pages.length - 1)];
+
+    const width = dto.visibleWidth ?? 160;
+    const height = dto.visibleHeight ?? 70;
+    const x = dto.visibleX ?? Math.max(0, targetPage.getWidth() - width - 36);
+    const y = dto.visibleY ?? 36;
+
+    if (signatureImagePath) {
+      const signatureImage = readFileSync(signatureImagePath);
+      const extension = extname(signatureImagePath).toLowerCase();
+      const embeddedImage =
+        extension === '.png'
+          ? await pdfDoc.embedPng(signatureImage)
+          : await pdfDoc.embedJpg(signatureImage);
+
+      targetPage.drawImage(embeddedImage, {
+        x,
+        y,
+        width,
+        height,
+      });
+    } else {
+      targetPage.drawText('Digitally Signed', {
+        x,
+        y: y + 18,
+        size: 12,
+      });
+      targetPage.drawText(`User: ${userId}`, {
+        x,
+        y: y + 2,
+        size: 9,
+      });
+    }
+
+    const bytes = await pdfDoc.save({ useObjectStreams: false });
+    return Buffer.from(bytes);
+  }
+
+  private async preRenderAllVisibleAppearances(
+    sourcePdf: Buffer,
+    documentId: string,
+    requestedSigners: Array<{
+      userId: string;
+      preferredSignatureMode: 'VISIBLE' | 'INVISIBLE';
+    }>,
+  ): Promise<Buffer> {
+    // Fetch all placeholder configs for visible signers
+    const visibleSigners = await this.prisma.documentSigner.findMany({
+      where: {
+        documentId,
+        userId: {
+          in: requestedSigners
+            .filter((s) => s.preferredSignatureMode === 'VISIBLE')
+            .map((s) => s.userId),
+        },
+      },
+      select: {
+        userId: true,
+        visiblePage: true,
+        visibleX: true,
+        visibleY: true,
+        visibleWidth: true,
+        visibleHeight: true,
+      },
+    });
+
+    if (visibleSigners.length === 0) {
+      return sourcePdf;
+    }
+
+    const pdfDoc = await PDFDocument.load(sourcePdf);
+    const pages = pdfDoc.getPages();
+
+    if (pages.length === 0) {
+      throw new BadRequestException('Dokumen PDF tidak memiliki halaman');
+    }
+
+    // Render all visible signatures to the PDF
+    for (const signer of visibleSigners) {
+      const pageIndex = Math.max(0, (signer.visiblePage ?? 1) - 1);
+      const targetPage = pages[Math.min(pageIndex, pages.length - 1)];
+      const width = signer.visibleWidth ?? 160;
+      const height = signer.visibleHeight ?? 70;
+      const x = signer.visibleX ?? 36;
+      const y = signer.visibleY ?? 36;
+
+      const signatureImagePath = this.resolveSignatureImagePath(signer.userId);
+      if (!signatureImagePath) {
+        throw new BadRequestException(
+          `Signature image signer ${signer.userId} belum tersedia untuk pre-render visible signature`,
+        );
+      }
+
+      try {
+        const signatureImage = readFileSync(signatureImagePath);
+        const extension = extname(signatureImagePath).toLowerCase();
+        const embeddedImage =
+          extension === '.png'
+            ? await pdfDoc.embedPng(signatureImage)
+            : await pdfDoc.embedJpg(signatureImage);
+
+        targetPage.drawImage(embeddedImage, {
+          x,
+          y,
+          width,
+          height,
+        });
+      } catch (err) {
+        throw new BadRequestException(
+          `Gagal membaca signature image untuk signer ${signer.userId}`,
+        );
+      }
+    }
+
+    const bytes = await pdfDoc.save({ useObjectStreams: false });
+    return Buffer.from(bytes);
   }
 
   private async preparePdfForSigning(

@@ -42,6 +42,11 @@ enum CertificateStatus {
   EXPIRED
 }
 
+enum SignaturePreference {
+  VISIBLE
+  INVISIBLE
+}
+
 model User {
   id              String   @id @default(uuid())
   
@@ -56,6 +61,8 @@ model User {
 
   status          UserStatus @default(ACTIVE)
   role            Role       @default(MEMBER) 
+
+  preferredSignatureMode SignaturePreference @default(INVISIBLE)
 
   lastLoginAt     DateTime?
 
@@ -209,6 +216,13 @@ model DocumentSigner {
 
   // Urutan tanda tangan (misal: 1,2,3) – opsional jika berurutan
   order               Int?
+
+  // Posisi placeholder visible signature per signer
+  visiblePage         Int?
+  visibleX            Float?
+  visibleY            Float?
+  visibleWidth        Float?
+  visibleHeight       Float?
 
   createdAt           DateTime       @default(now())
   updatedAt           DateTime       @updatedAt

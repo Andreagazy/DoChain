@@ -109,6 +109,14 @@ export interface CertificationEligibilityResponse {
 
 export interface RequestSignersPayload {
   signerUserIds: string[];
+  placeholders?: Array<{
+    signerUserId: string;
+    visiblePage?: number;
+    visibleX?: number;
+    visibleY?: number;
+    visibleWidth?: number;
+    visibleHeight?: number;
+  }>;
 }
 
 export interface RequestSignersResponse {
@@ -122,9 +130,35 @@ export interface RequestSignersResponse {
     userId: string;
     email: string | null;
     displayName: string | null;
+    preferredSignatureMode: SignatureMode;
     status: string;
     order: number | null;
-    action: 'invited' | 're-requested' | 'already-exists';
+    action: 'invited' | 're-requested' | 'already-exists' | 'updated';
+    placeholder: {
+      visiblePage: number | null;
+      visibleX: number | null;
+      visibleY: number | null;
+      visibleWidth: number | null;
+      visibleHeight: number | null;
+    };
+  }>;
+}
+
+export interface DocumentSignerPlaceholdersResponse {
+  documentId: string;
+  signers: Array<{
+    userId: string;
+    order: number | null;
+    status: string;
+    email: string | null;
+    displayName: string | null;
+    placeholder: {
+      visiblePage: number | null;
+      visibleX: number | null;
+      visibleY: number | null;
+      visibleWidth: number | null;
+      visibleHeight: number | null;
+    };
   }>;
 }
 
@@ -155,6 +189,14 @@ export interface SignatureStatusResponse {
     fileName: string | null;
     storagePath: string;
   } | null;
+  preferredSignatureMode: SignatureMode;
+}
+
+export interface SignaturePreferenceResponse {
+  message: string;
+  userId: string;
+  preferredSignatureMode: SignatureMode;
+  updatedAt: string;
 }
 
 export interface UploadDocumentResponse {
@@ -201,6 +243,7 @@ export interface SignerCandidate {
   id: string;
   email: string;
   displayName: string | null;
+  preferredSignatureMode: SignatureMode;
 }
 
 export interface SignerCandidatesResponse {

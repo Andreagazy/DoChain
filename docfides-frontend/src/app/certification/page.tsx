@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AxiosError } from 'axios';
 import { AlertCircle, CheckCircle2, Loader2, Upload } from 'lucide-react';
@@ -13,6 +13,7 @@ import { AppShell } from '@/components/layout/app-shell';
 import { StatusBadge } from '@/components/documents/status-badge';
 import {
     getCertificationDocumentFile,
+    getDocumentSignerPlaceholders,
     getUser,
     getIdentityStatus,
     getSignatureStatus,
@@ -30,7 +31,87 @@ type ApiError = {
     message?: string | string[];
 };
 
-const PREFERRED_SIGNATURE_MODE_KEY = 'preferredSignatureMode';
+type PlaceholderConfig = {
+    visiblePage: number;
+    visibleX: number;
+    visibleY: number;
+    visibleWidth: number;
+    visibleHeight: number;
+};
+
+type PdfViewport = {
+    width: number;
+    height: number;
+};
+
+type PdfRenderTask = {
+    promise: Promise<void>;
+    cancel: () => void;
+};
+
+type PdfPageProxy = {
+    getViewport: (options: { scale: number }) => PdfViewport;
+    render: (options: {
+        canvasContext: CanvasRenderingContext2D;
+        canvas: HTMLCanvasElement;
+        viewport: PdfViewport;
+    }) => PdfRenderTask;
+    cleanup?: () => void;
+};
+
+type PdfDocumentProxy = {
+    numPages: number;
+    getPage: (pageNumber: number) => Promise<PdfPageProxy>;
+    destroy?: () => void;
+};
+
+type PdfJsModule = {
+    getDocument: (options: {
+        data: Uint8Array;
+        disableWorker?: boolean;
+    }) => {
+        promise: Promise<PdfDocumentProxy>;
+    };
+    GlobalWorkerOptions?: {
+        workerSrc?: string;
+    };
+};
+
+let cachedPdfJsModule: PdfJsModule | null = null;
+
+async function loadPdfJsModule(): Promise<PdfJsModule> {
+    if (cachedPdfJsModule) {
+        return cachedPdfJsModule;
+    }
+
+    try {
+        const pdfModule = await import('pdfjs-dist/legacy/build/pdf.mjs');
+        const pdfModuleLoaded = pdfModule as PdfJsModule & { GlobalWorkerOptions: { workerSrc: string } };
+
+        if (pdfModuleLoaded.GlobalWorkerOptions) {
+            pdfModuleLoaded.GlobalWorkerOptions.workerSrc = new URL(
+                'pdfjs-dist/legacy/build/pdf.worker.mjs',
+                import.meta.url
+            ).href;
+        }
+
+        cachedPdfJsModule = pdfModuleLoaded;
+        return cachedPdfJsModule;
+    } catch {
+        const fallbackModule = await import('pdfjs-dist/build/pdf.mjs');
+        const pdfModuleLoaded = fallbackModule as PdfJsModule & { GlobalWorkerOptions: { workerSrc: string } };
+
+        if (pdfModuleLoaded.GlobalWorkerOptions) {
+            pdfModuleLoaded.GlobalWorkerOptions.workerSrc = new URL(
+                'pdfjs-dist/build/pdf.worker.mjs',
+                import.meta.url
+            ).href;
+        }
+
+        cachedPdfJsModule = pdfModuleLoaded;
+        return cachedPdfJsModule;
+    }
+}
 
 function normalizeErrorMessage(err: unknown): string {
     const axiosError = err as AxiosError<ApiError>;
@@ -62,11 +143,26 @@ function CertificationFlowContent() {
     const [documentFile, setDocumentFile] = useState<File | null>(null);
     const [reason, setReason] = useState('DoChain digital signature');
     const [selectedDocumentPreviewUrl, setSelectedDocumentPreviewUrl] = useState('');
+    const [selectedDocumentPreviewBlob, setSelectedDocumentPreviewBlob] = useState<Blob | null>(null);
     const [previewLoading, setPreviewLoading] = useState(false);
     const [previewError, setPreviewError] = useState('');
+    const [previewPage, setPreviewPage] = useState(1);
+    const [previewPageCount, setPreviewPageCount] = useState(0);
+    const [previewPdfDocument, setPreviewPdfDocument] = useState<PdfDocumentProxy | null>(null);
+    const [renderedPageSize, setRenderedPageSize] = useState<{
+        pdfWidth: number;
+        pdfHeight: number;
+        viewWidth: number;
+        viewHeight: number;
+    } | null>(null);
 
     const [signerSearch, setSignerSearch] = useState('');
     const [orderedSignerIds, setOrderedSignerIds] = useState<string[]>([]);
+    const [placeholderBySignerId, setPlaceholderBySignerId] = useState<Record<string, PlaceholderConfig>>({});
+    const [activePickerSignerId, setActivePickerSignerId] = useState('');
+
+    const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+    const previewContainerRef = useRef<HTMLDivElement | null>(null);
 
     const selectedDocument = useMemo(
         () => myDocuments.find((doc) => doc.id === selectedDocumentId) ?? null,
@@ -92,10 +188,15 @@ function CertificationFlowContent() {
                 id: currentUser.id,
                 email: currentUser.email,
                 displayName: `${currentUser.displayName ?? 'Saya'} (Owner Dokumen)`,
+                preferredSignatureMode: preferredMode,
             });
         }
         return options;
-    }, [currentUser, signerCandidates]);
+    }, [currentUser, signerCandidates, preferredMode]);
+
+    const signerPreferenceById = useMemo(() => {
+        return new Map(signerOptions.map((item) => [item.id, item.preferredSignatureMode]));
+    }, [signerOptions]);
 
     const availableSignerOptions = useMemo(() => {
         const term = signerSearch.trim().toLowerCase();
@@ -117,7 +218,15 @@ function CertificationFlowContent() {
         return new Map(signerOptions.map((item) => [item.id, item]));
     }, [signerOptions]);
 
-    const refreshData = async () => {
+    const getDefaultPlaceholder = (index: number): PlaceholderConfig => ({
+        visiblePage: 1,
+        visibleX: 36,
+        visibleY: 36 + index * 80,
+        visibleWidth: 160,
+        visibleHeight: 70,
+    });
+
+    const refreshData = useCallback(async () => {
         const [identityStatus, signatureStatus, myDocs, assignedDocs, candidates] = await Promise.all([
             getIdentityStatus(),
             getSignatureStatus(),
@@ -132,6 +241,7 @@ function CertificationFlowContent() {
         }
 
         setHasSignature(signatureStatus.hasSignature);
+        setPreferredMode(signatureStatus.preferredSignatureMode);
         setMyDocuments(myDocs.documents);
         setAssignedDocuments(assignedDocs.assignments);
         setSignerCandidates(candidates.signers);
@@ -148,21 +258,12 @@ function CertificationFlowContent() {
             }
             return myDocs.documents[0]?.id ?? '';
         });
-    };
+    }, [router, searchParams]);
 
     useEffect(() => {
         async function loadPage() {
             try {
-                if (typeof window !== 'undefined') {
-                    const storedMode = localStorage.getItem(PREFERRED_SIGNATURE_MODE_KEY);
-                    if (storedMode !== 'visible' && storedMode !== 'invisible') {
-                        router.push('/signature-setup?next=/certification');
-                        return;
-                    }
-                    setPreferredMode(storedMode);
-                    setCurrentUser(getUser());
-                }
-
+                setCurrentUser(getUser());
                 await refreshData();
             } catch (err) {
                 setError(normalizeErrorMessage(err));
@@ -172,13 +273,18 @@ function CertificationFlowContent() {
         }
 
         void loadPage();
-    }, [router]);
+    }, [refreshData, router]);
 
     useEffect(() => {
         let objectUrl = '';
 
         async function loadSelectedDocumentPreview() {
             setPreviewError('');
+            setPreviewPage(1);
+            setPreviewPageCount(0);
+            setRenderedPageSize(null);
+            setSelectedDocumentPreviewBlob(null);
+            setPreviewPdfDocument(null);
 
             if (!selectedDocumentId) {
                 setSelectedDocumentPreviewUrl('');
@@ -188,6 +294,7 @@ function CertificationFlowContent() {
             setPreviewLoading(true);
             try {
                 const blob = await getCertificationDocumentFile(selectedDocumentId);
+                setSelectedDocumentPreviewBlob(blob);
                 objectUrl = URL.createObjectURL(blob);
                 setSelectedDocumentPreviewUrl(objectUrl);
             } catch (err) {
@@ -206,6 +313,163 @@ function CertificationFlowContent() {
             }
         };
     }, [selectedDocumentId]);
+
+    useEffect(() => {
+        let isMounted = true;
+
+        async function loadStoredPlaceholders() {
+            setOrderedSignerIds([]);
+            setPlaceholderBySignerId({});
+            setActivePickerSignerId('');
+
+            if (!selectedDocumentId) {
+                return;
+            }
+
+            try {
+                const data = await getDocumentSignerPlaceholders(selectedDocumentId);
+                if (!isMounted || !data.signers.length) {
+                    return;
+                }
+
+                const sortedSigners = [...data.signers].sort((a, b) => {
+                    const orderA = a.order ?? Number.MAX_SAFE_INTEGER;
+                    const orderB = b.order ?? Number.MAX_SAFE_INTEGER;
+                    return orderA - orderB;
+                });
+
+                const nextOrderIds = sortedSigners.map((item) => item.userId);
+                const nextPlaceholderMap = sortedSigners.reduce<Record<string, PlaceholderConfig>>((acc, item, index) => {
+                    const fallback = getDefaultPlaceholder(index);
+                    acc[item.userId] = {
+                        visiblePage: item.placeholder.visiblePage ?? fallback.visiblePage,
+                        visibleX: item.placeholder.visibleX ?? fallback.visibleX,
+                        visibleY: item.placeholder.visibleY ?? fallback.visibleY,
+                        visibleWidth: item.placeholder.visibleWidth ?? fallback.visibleWidth,
+                        visibleHeight: item.placeholder.visibleHeight ?? fallback.visibleHeight,
+                    };
+                    return acc;
+                }, {});
+
+                setOrderedSignerIds(nextOrderIds);
+                setPlaceholderBySignerId(nextPlaceholderMap);
+                setActivePickerSignerId(
+                    sortedSigners.find((item) => signerPreferenceById.get(item.userId) === 'visible')?.userId ?? '',
+                );
+            } catch {
+                // Ignore documents without signer setup yet.
+            }
+        }
+
+        void loadStoredPlaceholders();
+
+        return () => {
+            isMounted = false;
+        };
+    }, [selectedDocumentId, signerPreferenceById]);
+
+    useEffect(() => {
+        let cancelled = false;
+        let loadedDocument: PdfDocumentProxy | null = null;
+
+        async function loadPdfDocument() {
+            if (!selectedDocumentPreviewBlob) {
+                setPreviewPdfDocument(null);
+                setPreviewPageCount(0);
+                return;
+            }
+
+            try {
+                const pdfjs = await loadPdfJsModule();
+                const buffer = await selectedDocumentPreviewBlob.arrayBuffer();
+                const loadingTask = pdfjs.getDocument({
+                    data: new Uint8Array(buffer),
+                });
+                const document = await loadingTask.promise;
+
+                if (cancelled) {
+                    document.destroy?.();
+                    return;
+                }
+
+                loadedDocument = document;
+                setPreviewPdfDocument(document);
+                setPreviewPageCount(document.numPages);
+                setPreviewPage(1);
+            } catch (err) {
+                if (!cancelled) {
+                    setPreviewError(normalizeErrorMessage(err));
+                }
+            }
+        }
+
+        void loadPdfDocument();
+
+        return () => {
+            cancelled = true;
+            loadedDocument?.destroy?.();
+        };
+    }, [selectedDocumentPreviewBlob]);
+
+    useEffect(() => {
+        let cancelled = false;
+        let activeRenderTask: { cancel: () => void } | null = null;
+
+        async function renderPreviewPage() {
+            if (!previewPdfDocument || !previewCanvasRef.current || !previewContainerRef.current) {
+                return;
+            }
+
+            const page = await previewPdfDocument.getPage(previewPage);
+            if (cancelled || !previewCanvasRef.current || !previewContainerRef.current) {
+                return;
+            }
+
+            const unscaledViewport = page.getViewport({ scale: 1 });
+            const maxWidth = previewContainerRef.current.clientWidth > 0
+                ? previewContainerRef.current.clientWidth
+                : 920;
+            const scale = maxWidth / unscaledViewport.width;
+            const viewport = page.getViewport({ scale });
+
+            const canvas = previewCanvasRef.current;
+            const context = canvas.getContext('2d');
+            if (!context) {
+                return;
+            }
+
+            canvas.width = Math.floor(viewport.width);
+            canvas.height = Math.floor(viewport.height);
+            canvas.style.width = `${viewport.width}px`;
+            canvas.style.height = `${viewport.height}px`;
+
+            const renderTask = page.render({
+                canvasContext: context,
+                canvas,
+                viewport,
+            });
+
+            activeRenderTask = renderTask;
+            await renderTask.promise;
+
+            if (!cancelled) {
+                setRenderedPageSize({
+                    pdfWidth: unscaledViewport.width,
+                    pdfHeight: unscaledViewport.height,
+                    viewWidth: viewport.width,
+                    viewHeight: viewport.height,
+                });
+                page.cleanup?.();
+            }
+        }
+
+        void renderPreviewPage();
+
+        return () => {
+            cancelled = true;
+            activeRenderTask?.cancel();
+        };
+    }, [previewPdfDocument, previewPage]);
 
     const execute = async (action: string, fn: () => Promise<void>) => {
         setError('');
@@ -246,7 +510,28 @@ function CertificationFlowContent() {
         await execute('Simpan Urutan Signer', async () => {
             await startDocumentCertification(selectedDocumentId);
             if (orderedSignerIds.length > 0) {
-                await requestDocumentSigners(selectedDocumentId, { signerUserIds: orderedSignerIds });
+                const placeholdersForVisibleSigners = orderedSignerIds
+                    .filter((signerId) => signerPreferenceById.get(signerId) === 'visible')
+                    .map((signerId, index) => {
+                        const orderIndex = orderedSignerIds.indexOf(signerId);
+                        const fallback = getDefaultPlaceholder(orderIndex >= 0 ? orderIndex : index);
+                        const configured = placeholderBySignerId[signerId] ?? fallback;
+                        return {
+                            signerUserId: signerId,
+                            visiblePage: configured.visiblePage,
+                            visibleX: configured.visibleX,
+                            visibleY: configured.visibleY,
+                            visibleWidth: configured.visibleWidth,
+                            visibleHeight: configured.visibleHeight,
+                        };
+                    });
+
+                await requestDocumentSigners(selectedDocumentId, {
+                    signerUserIds: orderedSignerIds,
+                    ...(placeholdersForVisibleSigners.length > 0
+                        ? { placeholders: placeholdersForVisibleSigners }
+                        : {}),
+                });
             }
             await refreshData();
         });
@@ -306,9 +591,105 @@ function CertificationFlowContent() {
         if (!signerId || orderedSignerIds.includes(signerId)) {
             return;
         }
-        setOrderedSignerIds((prev) => [...prev, signerId]);
+
+        const shouldDefaultVisible = signerPreferenceById.get(signerId) === 'visible';
+
+        setOrderedSignerIds((prev) => {
+            const next = [...prev, signerId];
+            setPlaceholderBySignerId((current) => ({
+                ...current,
+                [signerId]: current[signerId] ?? getDefaultPlaceholder(next.length - 1),
+            }));
+            if (shouldDefaultVisible && !activePickerSignerId) {
+                setActivePickerSignerId(signerId);
+            }
+            return next;
+        });
         setSignerSearch('');
     };
+
+    const handlePreviewPickPosition = (event: MouseEvent<HTMLDivElement>) => {
+        if (!activePickerSignerId || signerPreferenceById.get(activePickerSignerId) !== 'visible') {
+            setError('Pilih signer yang mode-nya visible terlebih dahulu.');
+            return;
+        }
+
+        if (!previewCanvasRef.current || !renderedPageSize) {
+            return;
+        }
+
+        const rect = previewCanvasRef.current.getBoundingClientRect();
+        const clickX = event.clientX - rect.left;
+        const clickY = event.clientY - rect.top;
+
+        const scaleX = renderedPageSize.viewWidth / renderedPageSize.pdfWidth;
+        const scaleY = renderedPageSize.viewHeight / renderedPageSize.pdfHeight;
+
+        const currentConfig = placeholderBySignerId[activePickerSignerId] ?? getDefaultPlaceholder(0);
+        const width = currentConfig.visibleWidth;
+        const height = currentConfig.visibleHeight;
+
+        const rawPdfX = clickX / scaleX - width / 2;
+        const rawPdfY = renderedPageSize.pdfHeight - clickY / scaleY - height / 2;
+
+        const nextX = Math.max(0, Math.min(renderedPageSize.pdfWidth - width, rawPdfX));
+        const nextY = Math.max(0, Math.min(renderedPageSize.pdfHeight - height, rawPdfY));
+
+        setPlaceholderBySignerId((current) => ({
+            ...current,
+            [activePickerSignerId]: {
+                ...currentConfig,
+                visiblePage: previewPage,
+                visibleX: Number(nextX.toFixed(2)),
+                visibleY: Number(nextY.toFixed(2)),
+            },
+        }));
+    };
+
+    const previewOverlayBoxes = useMemo(() => {
+        if (!renderedPageSize) {
+            return [];
+        }
+
+        const scaleX = renderedPageSize.viewWidth / renderedPageSize.pdfWidth;
+        const scaleY = renderedPageSize.viewHeight / renderedPageSize.pdfHeight;
+
+        return orderedSignerIds
+            .map((signerId, index) => {
+                if (signerPreferenceById.get(signerId) !== 'visible') {
+                    return null;
+                }
+
+                const cfg = placeholderBySignerId[signerId] ?? getDefaultPlaceholder(index);
+                if (cfg.visiblePage !== previewPage) {
+                    return null;
+                }
+
+                const left = cfg.visibleX * scaleX;
+                const top = (renderedPageSize.pdfHeight - (cfg.visibleY + cfg.visibleHeight)) * scaleY;
+                const width = cfg.visibleWidth * scaleX;
+                const height = cfg.visibleHeight * scaleY;
+
+                return {
+                    signerId,
+                    order: index + 1,
+                    left,
+                    top,
+                    width,
+                    height,
+                    isActive: signerId === activePickerSignerId,
+                };
+            })
+            .filter((item): item is {
+                signerId: string;
+                order: number;
+                left: number;
+                top: number;
+                width: number;
+                height: number;
+                isActive: boolean;
+            } => item !== null);
+    }, [activePickerSignerId, orderedSignerIds, placeholderBySignerId, previewPage, renderedPageSize, signerPreferenceById]);
 
     const moveSigner = (index: number, direction: -1 | 1) => {
         const nextIndex = index + direction;
@@ -326,7 +707,15 @@ function CertificationFlowContent() {
     };
 
     const removeSigner = (id: string) => {
-        setOrderedSignerIds((prev) => prev.filter((item) => item !== id));
+        setOrderedSignerIds((prev) => {
+            const next = prev.filter((item) => item !== id);
+            return next;
+        });
+        setPlaceholderBySignerId((current) => {
+            const next = { ...current };
+            delete next[id];
+            return next;
+        });
     };
 
     if (loading) {
@@ -438,16 +827,43 @@ function CertificationFlowContent() {
                         <div className="rounded-md border border-slate-200 bg-white p-3">
                             <div className="mb-2 flex items-center justify-between gap-2">
                                 <p className="text-sm font-medium text-slate-900">Preview Dokumen Sebelum Tanda Tangan</p>
-                                {selectedDocumentPreviewUrl ? (
-                                    <Button
-                                        type="button"
-                                        variant="outline"
-                                        className="border-slate-300"
-                                        onClick={() => window.open(selectedDocumentPreviewUrl, '_blank', 'noopener,noreferrer')}
-                                    >
-                                        Buka di Tab Baru
-                                    </Button>
-                                ) : null}
+                                <div className="flex items-center gap-2">
+                                    {previewPageCount > 0 ? (
+                                        <>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                className="border-slate-300"
+                                                onClick={() => setPreviewPage((page) => Math.max(1, page - 1))}
+                                                disabled={previewPage <= 1}
+                                            >
+                                                Halaman Sebelumnya
+                                            </Button>
+                                            <span className="text-xs text-slate-600">
+                                                Halaman {previewPage} / {previewPageCount}
+                                            </span>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                className="border-slate-300"
+                                                onClick={() => setPreviewPage((page) => Math.min(previewPageCount, page + 1))}
+                                                disabled={previewPage >= previewPageCount}
+                                            >
+                                                Halaman Berikutnya
+                                            </Button>
+                                        </>
+                                    ) : null}
+                                    {selectedDocumentPreviewUrl ? (
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            className="border-slate-300"
+                                            onClick={() => window.open(selectedDocumentPreviewUrl, '_blank', 'noopener,noreferrer')}
+                                        >
+                                            Buka di Tab Baru
+                                        </Button>
+                                    ) : null}
+                                </div>
                             </div>
 
                             {previewLoading ? (
@@ -459,25 +875,41 @@ function CertificationFlowContent() {
                                     Gagal memuat preview: {previewError}
                                 </div>
                             ) : selectedDocumentPreviewUrl ? (
-                                <iframe
-                                    title="Preview dokumen terpilih"
-                                    src={selectedDocumentPreviewUrl}
-                                    className="h-[480px] w-full rounded-md border border-slate-200"
-                                />
+                                <div className="space-y-2">
+                                    <p className="text-xs text-slate-600">
+                                        Klik pada area PDF untuk menaruh placeholder signer yang mode-nya visible.
+                                    </p>
+                                    <div ref={previewContainerRef} className="w-full overflow-auto rounded-md border border-slate-200 bg-slate-50 p-2">
+                                        <div
+                                            className={`relative inline-block ${activePickerSignerId && signerPreferenceById.get(activePickerSignerId) === 'visible' ? 'cursor-crosshair' : 'cursor-not-allowed'}`}
+                                            onClick={handlePreviewPickPosition}
+                                        >
+                                            <canvas ref={previewCanvasRef} className="block rounded-md bg-white" />
+                                            {previewOverlayBoxes.map((box) => (
+                                                <div
+                                                    key={box.signerId}
+                                                    className={`absolute border-2 ${box.isActive ? 'border-blue-600 bg-blue-100/30' : 'border-emerald-500 bg-emerald-100/20'}`}
+                                                    style={{
+                                                        left: `${box.left}px`,
+                                                        top: `${box.top}px`,
+                                                        width: `${box.width}px`,
+                                                        height: `${box.height}px`,
+                                                    }}
+                                                >
+                                                    <span className="absolute -top-5 left-0 rounded bg-slate-900 px-1.5 py-0.5 text-[10px] text-white">
+                                                        #{box.order}
+                                                    </span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
                             ) : (
                                 <div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
                                     Pilih dokumen terlebih dahulu untuk melihat isi dokumen sebelum sign.
                                 </div>
                             )}
                         </div>
-
-                        {preferredMode === 'visible' && (
-                            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                                <p className="text-xs text-slate-600">
-                                    Mode visible menggunakan lokasi placeholder default dari backend.
-                                </p>
-                            </div>
-                        )}
 
                         <div className="space-y-2">
                             <Input
@@ -510,12 +942,36 @@ function CertificationFlowContent() {
                             )}
                             {orderedSignerIds.map((id, index) => {
                                 const signer = signerById.get(id);
+                                const placeholder = placeholderBySignerId[id] ?? getDefaultPlaceholder(index);
+                                const isVisibleSigner = signerPreferenceById.get(id) === 'visible';
                                 return (
                                     <div key={id} className="rounded-md border border-slate-200 bg-slate-50 p-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
-                                        <p className="text-sm text-slate-800">
-                                            Urutan {index + 1}: <span className="font-semibold">{signer?.displayName ?? signer?.email ?? id}</span>
-                                        </p>
+                                        <div className="flex-1 space-y-3">
+                                            <p className="text-sm text-slate-800">
+                                                Urutan {index + 1}: <span className="font-semibold">{signer?.displayName ?? signer?.email ?? id}</span>
+                                            </p>
+                                            <p className="text-xs text-slate-600">
+                                                Mode: {isVisibleSigner ? 'Visible' : 'Invisible'}{isVisibleSigner ? `. Posisi: page ${placeholder.visiblePage}, x ${placeholder.visibleX.toFixed(2)}, y ${placeholder.visibleY.toFixed(2)}, width ${placeholder.visibleWidth.toFixed(2)}, height ${placeholder.visibleHeight.toFixed(2)}` : '. Tidak perlu set posisi, hanya mengikuti urutan signer.'}
+                                            </p>
+                                        </div>
                                         <div className="flex gap-2">
+                                            <Badge variant={isVisibleSigner ? 'success' : 'neutral'} className="self-center">
+                                                {isVisibleSigner ? 'Visible' : 'Invisible'}
+                                            </Badge>
+                                            <Button
+                                                disabled={!isVisibleSigner}
+                                                variant={activePickerSignerId === id ? 'default' : 'outline'}
+                                                className={activePickerSignerId === id ? '' : 'border-slate-300'}
+                                                onClick={() => {
+                                                    if (!isVisibleSigner) {
+                                                        return;
+                                                    }
+                                                    setActivePickerSignerId(id);
+                                                    setPreviewPage(placeholder.visiblePage);
+                                                }}
+                                            >
+                                                Pilih di Preview
+                                            </Button>
                                             <Button variant="outline" className="border-slate-300" onClick={() => moveSigner(index, -1)} disabled={index === 0}>Naik</Button>
                                             <Button variant="outline" className="border-slate-300" onClick={() => moveSigner(index, 1)} disabled={index === orderedSignerIds.length - 1}>Turun</Button>
                                             <Button variant="outline" className="border-slate-300" onClick={() => removeSigner(id)}>Hapus</Button>

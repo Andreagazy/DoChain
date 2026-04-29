@@ -3,6 +3,7 @@ import {
     Controller,
     Get,
     Param,
+    Patch,
     Post,
     Req,
     Res,
@@ -20,6 +21,7 @@ import { IdentityApprovedGuard } from '../identity/guard/identity-approved.guard
 import { CertificationService } from './certification.service';
 import { SignDocumentDto } from './dto/sign-document.dto';
 import { RequestSignersDto } from './dto/request-signers.dto';
+import { UpdateSignaturePreferenceDto } from './dto/update-signature-preference.dto';
 
 type RequestWithUser = Request & {
     user: {
@@ -98,7 +100,10 @@ export class CertificationController {
         );
 
         res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `inline; filename="${preview.fileName}"`);
+        res.setHeader(
+            'Content-Disposition',
+            `inline; filename="${preview.fileName}"`,
+        );
         res.send(preview.content);
     }
 
@@ -114,7 +119,10 @@ export class CertificationController {
         );
 
         res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename="${file.fileName}"`);
+        res.setHeader(
+            'Content-Disposition',
+            `attachment; filename="${file.fileName}"`,
+        );
         res.send(file.content);
     }
 
@@ -130,8 +138,22 @@ export class CertificationController {
         );
 
         res.setHeader('Content-Type', 'application/pdf');
-        res.setHeader('Content-Disposition', `attachment; filename="${file.fileName}"`);
+        res.setHeader(
+            'Content-Disposition',
+            `attachment; filename="${file.fileName}"`,
+        );
         res.send(file.content);
+    }
+
+    @Get('documents/:documentId/placeholders')
+    async getSignerPlaceholders(
+        @Req() req: RequestWithUser,
+        @Param('documentId') documentId: string,
+    ) {
+        return this.certificationService.getSignerPlaceholders(
+            req.user.userId,
+            documentId,
+        );
     }
 
     @Get('signers/candidates')
@@ -142,6 +164,17 @@ export class CertificationController {
     @Get('signature/me')
     async getSignatureStatus(@Req() req: RequestWithUser) {
         return this.certificationService.getSignatureStatus(req.user.userId);
+    }
+
+    @Patch('signature/preference')
+    async updateSignaturePreference(
+        @Req() req: RequestWithUser,
+        @Body() dto: UpdateSignaturePreferenceDto,
+    ) {
+        return this.certificationService.updateSignaturePreference(
+            req.user.userId,
+            dto,
+        );
     }
 
     @Get('documents/:documentId/eligibility')
