@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { AppShell } from '@/components/layout/app-shell';
 import { StatusBadge } from '@/components/documents/status-badge';
 import {
@@ -161,8 +162,20 @@ function CertificationFlowContent() {
     const [placeholderBySignerId, setPlaceholderBySignerId] = useState<Record<string, PlaceholderConfig>>({});
     const [activePickerSignerId, setActivePickerSignerId] = useState('');
 
+    // States for assigned document preview dialog
+    const [previewAssignedDialogOpen, setPreviewAssignedDialogOpen] = useState(false);
+    const [assignedDocumentPreviewUrl, setAssignedDocumentPreviewUrl] = useState('');
+    const [assignedDocumentPreviewBlob, setAssignedDocumentPreviewBlob] = useState<Blob | null>(null);
+    const [assignedPreviewLoading, setAssignedPreviewLoading] = useState(false);
+    const [assignedPreviewError, setAssignedPreviewError] = useState('');
+    const [assignedPreviewPage, setAssignedPreviewPage] = useState(1);
+    const [assignedPreviewPageCount, setAssignedPreviewPageCount] = useState(0);
+    const [assignedPreviewPdfDocument, setAssignedPreviewPdfDocument] = useState<PdfDocumentProxy | null>(null);
+
     const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
     const previewContainerRef = useRef<HTMLDivElement | null>(null);
+    const assignedPreviewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+    const assignedPreviewContainerRef = useRef<HTMLDivElement | null>(null);
 
     const selectedDocument = useMemo(
         () => myDocuments.find((doc) => doc.id === selectedDocumentId) ?? null,
@@ -471,6 +484,114 @@ function CertificationFlowContent() {
         };
     }, [previewPdfDocument, previewPage]);
 
+    // Effect: Load assigned document PDF into preview
+    useEffect(() => {
+        let cancelled = false;
+        let loadedDocument: PdfDocumentProxy | null = null;
+
+        async function loadPdfDocument() {
+            if (!assignedDocumentPreviewBlob) {
+                setAssignedPreviewPdfDocument(null);
+                setAssignedPreviewPageCount(0);
+                return;
+            }
+
+            try {
+                const pdfjs = await loadPdfJsModule();
+                const buffer = await assignedDocumentPreviewBlob.arrayBuffer();
+                const loadingTask = pdfjs.getDocument({
+                    data: new Uint8Array(buffer),
+                });
+                const document = await loadingTask.promise;
+
+                if (cancelled) {
+                    document.destroy?.();
+                    return;
+                }
+
+                loadedDocument = document;
+                setAssignedPreviewPdfDocument(document);
+                setAssignedPreviewPageCount(document.numPages);
+                setAssignedPreviewPage(1);
+            } catch (err) {
+                if (!cancelled) {
+                    setAssignedPreviewError(normalizeErrorMessage(err));
+                }
+            }
+        }
+
+        void loadPdfDocument();
+
+        return () => {
+            cancelled = true;
+            loadedDocument?.destroy?.();
+        };
+    }, [assignedDocumentPreviewBlob]);
+
+    // Effect: Render assigned document preview page
+    useEffect(() => {
+        let cancelled = false;
+        let activeRenderTask: { cancel: () => void } | null = null;
+
+        async function renderPreviewPage() {
+            if (!assignedPreviewPdfDocument || !assignedPreviewCanvasRef.current || !assignedPreviewContainerRef.current) {
+                return;
+            }
+
+            const page = await assignedPreviewPdfDocument.getPage(assignedPreviewPage);
+            if (cancelled || !assignedPreviewCanvasRef.current || !assignedPreviewContainerRef.current) {
+                return;
+            }
+
+            const unscaledViewport = page.getViewport({ scale: 1 });
+            const maxWidth = assignedPreviewContainerRef.current.clientWidth > 0
+                ? assignedPreviewContainerRef.current.clientWidth
+                : 920;
+            const scale = maxWidth / unscaledViewport.width;
+            const viewport = page.getViewport({ scale });
+
+            const canvas = assignedPreviewCanvasRef.current;
+            const context = canvas.getContext('2d');
+            if (!context) {
+                return;
+            }
+
+            canvas.width = Math.floor(viewport.width);
+            canvas.height = Math.floor(viewport.height);
+            canvas.style.width = `${viewport.width}px`;
+            canvas.style.height = `${viewport.height}px`;
+
+            const renderTask = page.render({
+                canvasContext: context,
+                canvas,
+                viewport,
+            });
+
+            activeRenderTask = renderTask;
+            await renderTask.promise;
+
+            if (!cancelled) {
+                page.cleanup?.();
+            }
+        }
+
+        void renderPreviewPage();
+
+        return () => {
+            cancelled = true;
+            activeRenderTask?.cancel();
+        };
+    }, [assignedPreviewPdfDocument, assignedPreviewPage]);
+
+    // Effect: Cleanup assigned document preview on dialog close
+    useEffect(() => {
+        return () => {
+            if (previewAssignedDialogOpen === false && assignedDocumentPreviewUrl) {
+                URL.revokeObjectURL(assignedDocumentPreviewUrl);
+            }
+        };
+    }, [previewAssignedDialogOpen, assignedDocumentPreviewUrl]);
+
     const execute = async (action: string, fn: () => Promise<void>) => {
         setError('');
         setSuccess('');
@@ -606,6 +727,29 @@ function CertificationFlowContent() {
             return next;
         });
         setSignerSearch('');
+    };
+
+    const handleOpenAssignedDocumentPreview = async (documentId: string) => {
+        setAssignedPreviewError('');
+        setAssignedPreviewPage(1);
+        setAssignedPreviewPageCount(0);
+        setAssignedDocumentPreviewBlob(null);
+        setAssignedPreviewPdfDocument(null);
+        setAssignedDocumentPreviewUrl('');
+        setPreviewAssignedDialogOpen(true);
+
+        setAssignedPreviewLoading(true);
+        try {
+            const blob = await getCertificationDocumentFile(documentId);
+            setAssignedDocumentPreviewBlob(blob);
+            const objectUrl = URL.createObjectURL(blob);
+            setAssignedDocumentPreviewUrl(objectUrl);
+        } catch (err) {
+            setAssignedDocumentPreviewUrl('');
+            setAssignedPreviewError(normalizeErrorMessage(err));
+        } finally {
+            setAssignedPreviewLoading(false);
+        }
     };
 
     const handlePreviewPickPosition = (event: MouseEvent<HTMLDivElement>) => {
@@ -1023,7 +1167,13 @@ function CertificationFlowContent() {
                         {assignedDocuments.map((assignment) => (
                             <div key={`${assignment.document.id}-${assignment.order ?? 'x'}`} className="rounded-md border border-slate-200 bg-slate-50 p-3 flex flex-col md:flex-row md:items-center md:justify-between gap-2">
                                 <div>
-                                    <p className="font-semibold text-slate-900">{assignment.document.originalFileName ?? assignment.document.id}</p>
+                                    <button
+                                        type="button"
+                                        onClick={() => handleOpenAssignedDocumentPreview(assignment.document.id)}
+                                        className="font-semibold text-slate-900 hover:text-blue-600 hover:underline cursor-pointer text-left"
+                                    >
+                                        {assignment.document.originalFileName ?? assignment.document.id}
+                                    </button>
                                     <p className="text-slate-600">
                                         Owner: {assignment.document.ownerDisplayName ?? assignment.document.ownerEmail ?? '-'} | Urutan: {assignment.order ?? '-'} | Status signer: {assignment.signerStatus}
                                     </p>
@@ -1039,6 +1189,89 @@ function CertificationFlowContent() {
                         ))}
                     </CardContent>
                 </Card>
+
+                {/* Dialog untuk preview dokumen yang akan ditandatangani */}
+                <Dialog open={previewAssignedDialogOpen} onOpenChange={setPreviewAssignedDialogOpen}>
+                    <DialogContent className="w-[95vw] h-[95vh] max-w-none overflow-y-auto p-6">
+                        <DialogHeader>
+                            <DialogTitle>
+                                Preview Dokumen
+                            </DialogTitle>
+                            <DialogDescription>
+                                Dokumen yang perlu Anda tandatangani. Periksa isi dokumen sebelum menandatangani.
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        <div className="space-y-4">
+                            {assignedPreviewLoading ? (
+                                <div className="rounded-md border border-slate-200 bg-slate-50 p-8 flex items-center justify-center">
+                                    <div className="flex items-center gap-2 text-slate-600">
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        <span>Memuat dokumen...</span>
+                                    </div>
+                                </div>
+                            ) : assignedPreviewError ? (
+                                <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                                    Gagal memuat preview: {assignedPreviewError}
+                                </div>
+                            ) : assignedDocumentPreviewUrl ? (
+                                <div className="space-y-3">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <p className="text-sm font-medium text-slate-900">Preview Dokumen</p>
+                                        <div className="flex items-center gap-2">
+                                            {assignedPreviewPageCount > 0 ? (
+                                                <>
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        className="border-slate-300"
+                                                        size="sm"
+                                                        onClick={() => setAssignedPreviewPage((page) => Math.max(1, page - 1))}
+                                                        disabled={assignedPreviewPage <= 1}
+                                                    >
+                                                        Prev
+                                                    </Button>
+                                                    <span className="text-xs text-slate-600">
+                                                        {assignedPreviewPage} / {assignedPreviewPageCount}
+                                                    </span>
+                                                    <Button
+                                                        type="button"
+                                                        variant="outline"
+                                                        className="border-slate-300"
+                                                        size="sm"
+                                                        onClick={() => setAssignedPreviewPage((page) => Math.min(assignedPreviewPageCount, page + 1))}
+                                                        disabled={assignedPreviewPage >= assignedPreviewPageCount}
+                                                    >
+                                                        Next
+                                                    </Button>
+                                                </>
+                                            ) : null}
+                                            {assignedDocumentPreviewUrl ? (
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    className="border-slate-300"
+                                                    size="sm"
+                                                    onClick={() => window.open(assignedDocumentPreviewUrl, '_blank', 'noopener,noreferrer')}
+                                                >
+                                                    Buka di Tab Baru
+                                                </Button>
+                                            ) : null}
+                                        </div>
+                                    </div>
+
+                                    <div ref={assignedPreviewContainerRef} className="w-full overflow-auto rounded-md border border-slate-200 bg-slate-50 p-2 max-h-96">
+                                        <canvas ref={assignedPreviewCanvasRef} className="block rounded-md bg-white mx-auto" />
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                                    Mempersiapkan preview dokumen...
+                                </div>
+                            )}
+                        </div>
+                    </DialogContent>
+                </Dialog>
             </div>
         </AppShell>
     );
