@@ -4,8 +4,10 @@ import { Suspense, useEffect, useMemo, useRef, useState, type MouseEvent } from 
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { AxiosError } from 'axios';
-import { AlertCircle, CheckCircle2, Loader2, PenLine } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Eye, EyeOff, Loader2, PenLine, RotateCcw, Save, UploadCloud } from 'lucide-react';
+import { AppShell } from '@/components/layout/app-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -375,7 +377,7 @@ function SignatureSetupContent() {
 
     if (loading) {
         return (
-            <div className="min-h-screen bg-linear-to-br from-slate-50 via-blue-50 to-slate-100 flex items-center justify-center">
+            <div className="flex min-h-screen items-center justify-center bg-[#f6f7f9]">
                 <div className="flex items-center gap-2 text-slate-600">
                     <Loader2 className="animate-spin" />
                     <span>Memuat setup tanda tangan...</span>
@@ -385,17 +387,17 @@ function SignatureSetupContent() {
     }
 
     return (
-        <div className="min-h-screen bg-linear-to-br from-slate-50 via-blue-50 to-slate-100 text-slate-900">
-            <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
-                <div className="flex items-center justify-between">
-                    <div>
-                        <h1 className="text-3xl font-semibold">Setup Tanda Tangan</h1>
-                        <p className="text-sm text-slate-600 mt-1">Pilih mode default sebelum masuk ke proses sertifikasi dokumen.</p>
-                    </div>
-                    <Button variant="outline" className="border-slate-300" onClick={() => router.push('/dashboard')}>
-                        Dashboard
-                    </Button>
-                </div>
+        <AppShell title="Signature Setup" subtitle="Atur mode tanda tangan default untuk proses sertifikasi.">
+            <div className="space-y-6">
+                <section className="rounded-lg border border-blue-100 bg-white p-6 shadow-sm md:p-8">
+                        <Badge variant={identityApproved ? 'success' : 'warning'}>
+                            {identityApproved ? 'Identity Approved' : 'Identity Required'}
+                        </Badge>
+                        <h1 className="mt-4 text-2xl font-semibold text-slate-950 md:text-3xl">Setup tanda tangan digital</h1>
+                        <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                            Pilih invisible signature untuk signing tanpa gambar, atau visible signature jika tanda tangan perlu tampil pada PDF final.
+                        </p>
+                </section>
 
                 {error && (
                     <Alert className="border-red-200 bg-red-50 text-red-800">
@@ -412,7 +414,7 @@ function SignatureSetupContent() {
                 )}
 
                 {!identityApproved && (
-                    <Card className="border-amber-200 bg-amber-50">
+                    <Card className="rounded-lg border-amber-200 bg-amber-50 shadow-sm">
                         <CardHeader>
                             <CardTitle className="text-amber-900">Identitas Belum APPROVED</CardTitle>
                             <CardDescription className="text-amber-800">
@@ -425,7 +427,7 @@ function SignatureSetupContent() {
                     </Card>
                 )}
 
-                <Card className="border-slate-200 bg-white/90 shadow-sm">
+                <Card className="rounded-lg border-blue-100 bg-white shadow-sm">
                     <CardHeader>
                         <CardTitle className="flex items-center gap-2"><PenLine className="h-5 w-5" /> Pilihan Mode</CardTitle>
                         <CardDescription>
@@ -433,28 +435,37 @@ function SignatureSetupContent() {
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                             <button
                                 type="button"
                                 onClick={() => setMode('invisible')}
-                                className={`rounded-lg border px-4 py-3 text-left ${mode === 'invisible' ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white'}`}
+                                className={`rounded-lg border px-4 py-4 text-left transition ${mode === 'invisible' ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-100' : 'border-slate-200 bg-white hover:border-blue-200'}`}
                             >
-                                <p className="font-semibold text-slate-900">Invisible Signature</p>
+                                <div className="flex items-center gap-2">
+                                    <EyeOff className="h-4 w-4 text-blue-700" />
+                                    <p className="font-semibold text-slate-950">Invisible Signature</p>
+                                </div>
                                 <p className="text-xs text-slate-600 mt-1">Tidak perlu upload gambar tanda tangan.</p>
                             </button>
                             <button
                                 type="button"
                                 onClick={() => setMode('visible')}
-                                className={`rounded-lg border px-4 py-3 text-left ${mode === 'visible' ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white'}`}
+                                className={`rounded-lg border px-4 py-4 text-left transition ${mode === 'visible' ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-100' : 'border-slate-200 bg-white hover:border-blue-200'}`}
                             >
-                                <p className="font-semibold text-slate-900">Visible Signature</p>
+                                <div className="flex items-center gap-2">
+                                    <Eye className="h-4 w-4 text-blue-700" />
+                                    <p className="font-semibold text-slate-950">Visible Signature</p>
+                                </div>
                                 <p className="text-xs text-slate-600 mt-1">Gunakan gambar tanda tangan di PDF.</p>
                             </button>
                         </div>
 
                         {mode === 'visible' && (
                             <div className="space-y-2">
-                                <label className="text-sm text-slate-700">Upload tanda tangan (png/jpg)</label>
+                                <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                                    <UploadCloud className="h-4 w-4" />
+                                    Upload tanda tangan (png/jpg)
+                                </label>
                                 <Input
                                     type="file"
                                     accept="image/png,image/jpeg,image/jpg"
@@ -468,6 +479,7 @@ function SignatureSetupContent() {
                                     <div className="space-y-3 pt-2">
                                         <div className="flex flex-wrap gap-2">
                                             <Button type="button" variant="outline" className="border-slate-300" onClick={handleResetCrop}>
+                                                <RotateCcw className="h-4 w-4" />
                                                 Reset Crop
                                             </Button>
                                             <Button type="button" variant="outline" className="border-slate-300" onClick={handleUseFullImage}>
@@ -477,7 +489,7 @@ function SignatureSetupContent() {
 
                                         <div
                                             ref={previewContainerRef}
-                                            className="relative w-full overflow-hidden rounded-xl border border-slate-200 bg-slate-50"
+                                            className="relative w-full overflow-hidden rounded-lg border border-slate-200 bg-slate-50"
                                             style={{ aspectRatio: `${signatureImage.width} / ${signatureImage.height}` }}
                                             onMouseDown={handleCropPointerDown}
                                         >
@@ -524,13 +536,13 @@ function SignatureSetupContent() {
                         )}
 
                         <Button disabled={saving || !identityApproved} onClick={handleSave}>
-                            {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
+                            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                             Simpan & Lanjutkan
                         </Button>
                     </CardContent>
                 </Card>
             </div>
-        </div>
+        </AppShell>
     );
 }
 

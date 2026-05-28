@@ -6,9 +6,9 @@ import { RolesGuard } from '../auth/guard/roles.guard';
 import { IdentityApprovedGuard } from './guard/identity-approved.guard';
 
 @Module({
-    imports: [PrismaModule],
-    controllers: [IdentityController],
-    providers: [IdentityService, RolesGuard, IdentityApprovedGuard],
-    exports: [IdentityService, IdentityApprovedGuard],
+  imports: [PrismaModule],
+  controllers: [IdentityController],
+  providers: [IdentityService, RolesGuard, IdentityApprovedGuard],
+  exports: [IdentityService, IdentityApprovedGuard],
 })
-export class IdentityModule { }
+export class IdentityModule {}

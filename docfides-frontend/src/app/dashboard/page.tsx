@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { EmptyState } from '@/components/common/empty-state';
 import { StatCard } from '@/components/common/stat-card';
 import { AppShell } from '@/components/layout/app-shell';
-import { AlertCircle, FileCheck2, FileText, Loader2, Mail, ShieldCheck, User as UserIcon } from 'lucide-react';
+import { AlertCircle, ArrowRight, FileCheck2, FileText, Loader2, Mail, ShieldCheck, User as UserIcon } from 'lucide-react';
 import api from '@/lib/axios';
 import { getIdentityStatus, listMyCertificationDocuments, logout } from '@/lib/auth-service';
 import { IdentityStatus, User } from '@/types/auth';
@@ -25,7 +25,7 @@ export default function DashboardPage() {
   const [signedDocs, setSignedDocs] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const canReviewIdentity = user?.role === 'ADMIN' || user?.role === 'VERIFIER';
+  const canReviewIdentity = user?.role === 'SUPERADMIN' || user?.role === 'ADMIN_PRODI';
 
   useEffect(() => {
     async function loadProfile() {
@@ -35,8 +35,19 @@ export default function DashboardPage() {
           getIdentityStatus(),
         ]);
 
-        setUser(res.data as User);
+        const profile = res.data as User;
+        if (profile.role === 'SUPERADMIN') {
+          router.replace('/admin');
+          return;
+        }
+        if (profile.role === 'ADMIN_PRODI') {
+          router.replace('/admin-prodi');
+          return;
+        }
+
+        setUser(profile);
         setIdentityStatus(statusRes.status);
+
 
         if (statusRes.status === 'APPROVED') {
           const docsRes = await listMyCertificationDocuments();
@@ -108,90 +119,160 @@ export default function DashboardPage() {
   }
 
   return (
-    <AppShell title="Dashboard" subtitle="Monitor document pipeline and continue your certification workflow.">
-      <div className="space-y-6">
-        <section className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <AppShell title="Dashboard" subtitle="Ringkasan status akun dan dokumen sertifikasi Anda.">
+      <div className="space-y-8">
+        
+        {/* Formal welcome banner */}
+        <section className="rounded-2xl border border-blue-100 bg-blue-50 p-6 shadow-sm md:p-8">
+          <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
+            <div className="space-y-2">
+              <Badge className="rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wide text-blue-700 hover:bg-white">
+                DoChain Workspace
+              </Badge>
+              <h1 className="mt-2 text-2xl font-bold tracking-tight text-slate-800 md:text-3xl">
+                Mulai dan Pantau Sertifikasi Dokumen Anda
+              </h1>
+              <p className="max-w-2xl text-sm leading-relaxed text-slate-600">
+                Lanjutkan dokumen yang sedang berjalan atau unggah berkas PDF baru untuk mulai disertifikasi menggunakan teknologi tanda tangan digital berbasis blockchain terenkripsi.
+              </p>
+            </div>
+            
+            <div className="flex flex-wrap gap-3.5 shrink-0">
+              <Button asChild className="h-11 rounded-lg bg-blue-600 font-semibold text-white shadow-sm hover:bg-blue-700">
+                <Link href="/certification/upload" className="flex items-center gap-2">
+                  Mulai Sertifikasi
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </Button>
+              <Button variant="outline" className="h-11 rounded-lg border-blue-200 bg-white font-semibold text-blue-700 hover:bg-blue-50" asChild>
+                <Link href="/documents">Buka Dokumen</Link>
+              </Button>
+            </div>
+          </div>
+        </section>
+
+        {/* Statistics Cards Row */}
+        <section className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-4">
           <StatCard
-            label="Total Documents"
+            label="Total Dokumen"
             value={docTotal}
-            description="All uploaded documents"
-            icon={<FileText className="h-4 w-4" />}
+            description="Semua dokumen terdaftar"
+            icon={<FileText className="h-5 w-5" />}
+            tone="blue"
           />
           <StatCard
-            label="Pending Signatures"
+            label="Menunggu Tanda Tangan"
             value={pendingDocs}
-            description="Need action from signer"
-            icon={<FileCheck2 className="h-4 w-4" />}
+            description="Belum selesai ditandatangani"
+            icon={<FileCheck2 className="h-5 w-5" />}
+            tone="amber"
           />
           <StatCard
-            label="Fully Signed"
+            label="Selesai"
             value={signedDocs}
-            description="Finalized and verified"
-            icon={<ShieldCheck className="h-4 w-4" />}
+            description="Fully signed & certified"
+            icon={<ShieldCheck className="h-5 w-5" />}
+            tone="emerald"
           />
           <StatCard
-            label="Identity Status"
-            value={identityStatus}
-            description="Required for certification"
-            icon={<UserIcon className="h-4 w-4" />}
+            label="Status Identitas"
+            value={identityStatus === 'APPROVED' ? 'TERVERIFIKASI' : identityStatus}
+            description="Syarat utama sertifikasi"
+            icon={<UserIcon className="h-5 w-5" />}
+            tone="slate"
           />
         </section>
 
-        <section className="grid grid-cols-1 gap-6 xl:grid-cols-[2fr_1fr]">
-          <Card className="border-slate-200 bg-white/90 shadow-sm">
-            <CardHeader>
-              <CardTitle>Quick Actions</CardTitle>
-              <CardDescription>Move faster through your daily certification tasks.</CardDescription>
+        {/* Actions Grid and Profile Summary */}
+        <section className="grid grid-cols-1 gap-6 xl:grid-cols-[1.6fr_1fr]">
+          
+          {/* Main Quick Action Card */}
+          <Card className="rounded-2xl border border-slate-200/60 bg-white/80 backdrop-blur-xs p-2 shadow-sm card-hover-effect">
+            <CardHeader className="pb-4">
+              <CardTitle className="text-xl font-bold text-slate-800">Aksi Utama</CardTitle>
+              <CardDescription className="text-xs text-slate-500 font-medium">Pilih langkah cepat yang paling sering Anda butuhkan.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Link href="/documents/upload">
-                  <Button className="w-full">Upload New Document</Button>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 gap-3.5">
+                <Link href="/certification/upload" className="block">
+                  <Button className="w-full h-11 justify-start rounded-xl bg-slate-50 text-indigo-600 border border-slate-200/60 hover:bg-indigo-50/60 hover:text-indigo-700 hover:border-indigo-100 transition-all font-semibold text-sm">
+                    <FileText className="h-4.5 w-4.5 mr-2 shrink-0" />
+                    Upload dan sertifikasi dokumen baru
+                  </Button>
                 </Link>
-                <Link href="/documents">
-                  <Button variant="outline" className="w-full border-slate-300">Manage Documents</Button>
+                <Link href="/documents" className="block">
+                  <Button variant="outline" className="w-full h-11 justify-start rounded-xl border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-all font-semibold text-sm">
+                    <FileText className="h-4.5 w-4.5 mr-2 shrink-0" />
+                    Lihat semua dokumen saya
+                  </Button>
                 </Link>
-                <Link href="/certification">
-                  <Button variant="outline" className="w-full border-slate-300">Start Certification</Button>
-                </Link>
-                <Link href="/signature-setup?next=/certification">
-                  <Button variant="outline" className="w-full border-slate-300">Setup Signature</Button>
-                </Link>
-                <Link href="/identity" className="sm:col-span-2">
-                  <Button variant="outline" className="w-full border-slate-300">Manage Identity Verification</Button>
+                <Link href={identityStatus === 'APPROVED' ? '/signature-setup?next=/certification' : '/identity'} className="block">
+                  <Button variant="outline" className="w-full h-11 justify-start rounded-xl border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition-all font-semibold text-sm">
+                    <FileCheck2 className="h-4.5 w-4.5 mr-2 shrink-0" />
+                    {identityStatus === 'APPROVED' ? 'Atur tanda tangan digital' : 'Lengkapi berkas identitas profil'}
+                  </Button>
                 </Link>
                 {canReviewIdentity ? (
-                  <Link href="/verifier" className="sm:col-span-2">
-                    <Button className="w-full">Review Member Identity Requests</Button>
+                  <Link href="/verifier" className="block">
+                    <Button variant="outline" className="w-full h-11 justify-start rounded-xl border-slate-200 bg-white hover:bg-indigo-50/40 hover:text-indigo-600 hover:border-indigo-100 transition-all font-semibold text-sm">
+                      <ShieldCheck className="h-4.5 w-4.5 mr-2 shrink-0" />
+                      Review dan verifikasi identitas member
+                    </Button>
                   </Link>
                 ) : null}
               </div>
             </CardContent>
           </Card>
 
-          <Card className="border-slate-200 bg-white/90 shadow-sm">
-            <CardHeader>
-              <CardTitle>Account Summary</CardTitle>
-              <CardDescription>Signed in as active team member.</CardDescription>
+          {/* Premium Account Details Card */}
+          <Card className="rounded-2xl border border-slate-200/60 bg-white/80 backdrop-blur-xs p-2 shadow-sm card-hover-effect">
+            <CardHeader className="pb-4">
+              <CardTitle className="text-xl font-bold text-slate-800">Akun Pengguna</CardTitle>
+              <CardDescription className="text-xs text-slate-500 font-medium">Detail profil aktif Anda.</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3 text-sm">
-              <div className="flex items-start gap-3">
-                <Mail className="mt-0.5 h-4 w-4 text-slate-500" />
-                <div>
-                  <p className="text-slate-500">Email</p>
-                  <p className="font-medium text-slate-900">{user?.email}</p>
+            <CardContent className="space-y-4 text-sm">
+              <div className="flex items-start gap-3.5 rounded-xl bg-slate-50/50 border border-slate-100 p-3">
+                <Mail className="mt-0.5 h-4.5 w-4.5 text-indigo-500 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Alamat Email</p>
+                  <p className="font-semibold text-slate-800 break-all">{user?.email}</p>
                 </div>
               </div>
-              <div className="flex items-start gap-3">
-                <UserIcon className="mt-0.5 h-4 w-4 text-slate-500" />
-                <div>
-                  <p className="text-slate-500">Role</p>
-                  <p className="font-medium capitalize text-slate-900">{user?.role}</p>
+              
+              <div className="flex items-start gap-3.5 rounded-xl bg-slate-50/50 border border-slate-100 p-3">
+                <UserIcon className="mt-0.5 h-4.5 w-4.5 text-violet-500 shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Peran Pengguna</p>
+                  <p className="font-semibold text-slate-800 capitalize">{user?.role}</p>
                 </div>
               </div>
-              <div className="flex items-center justify-between rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-                <span className="text-slate-600">Identity Gate</span>
-                <Badge variant={identityStatus === 'APPROVED' ? 'success' : 'warning'}>{identityStatus}</Badge>
+              
+              {user?.academicProfile ? (
+                <div className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-4">
+                  <p className="text-[10px] font-bold text-indigo-500 uppercase tracking-wider">Profil Akademik Kampus</p>
+                  <p className="font-bold text-slate-800 text-sm mt-1">
+                    {user.academicProfile.positionTitle ?? user.academicProfile.type}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-600 font-medium">
+                    {user.academicProfile.identifier ? `${user.academicProfile.identifier} | ` : ''}
+                    {user.academicProfile.unitName}
+                  </p>
+                  {user.academicProfile.kelas || user.academicProfile.angkatan ? (
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      Kelas: {user.academicProfile.kelas ?? '-'} | Angkatan: {user.academicProfile.angkatan ?? '-'}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+              
+              <div className="flex items-center justify-between rounded-xl border border-slate-200/60 bg-white p-3.5 shadow-2xs">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Status Profil</span>
+                <Badge className={identityStatus === 'APPROVED' 
+                  ? 'bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 border border-emerald-500/20 font-bold px-2.5 py-0.5 rounded-full text-xs' 
+                  : 'bg-amber-500/10 text-amber-700 hover:bg-amber-500/20 border border-amber-500/20 font-bold px-2.5 py-0.5 rounded-full text-xs'
+                }>
+                  {identityStatus}
+                </Badge>
               </div>
             </CardContent>
           </Card>
@@ -199,11 +280,11 @@ export default function DashboardPage() {
 
         {docTotal === 0 ? (
           <EmptyState
-            title="No documents yet"
-            description="Start by uploading your first PDF to activate certification workflow and signer assignment."
+            title="Belum ada dokumen"
+            description="Upload PDF pertama Anda untuk memulai proses sertifikasi blockchain."
             action={
               <Link href="/documents/upload">
-                <Button>Upload your first document</Button>
+                <Button className="rounded-xl bg-indigo-600 hover:bg-indigo-500 font-semibold shadow-md shadow-indigo-600/10">Upload dokumen pertama</Button>
               </Link>
             }
           />

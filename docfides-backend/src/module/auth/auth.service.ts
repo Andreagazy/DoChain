@@ -19,6 +19,8 @@ import * as bcrypt from 'bcrypt';
 import { randomInt } from 'crypto';
 import { addMinutes } from 'date-fns';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { RegisterDto } from './dto/register.dto';
 
 @Injectable()
 export class AuthService {
@@ -29,12 +31,24 @@ export class AuthService {
     private jwtService: JwtService,
     private emailService: EmailService,
     private rateLimitService: RateLimitService,
-  ) { }
+  ) {}
+
+  private normalizeEmail(email: string): string {
+    return email.trim().toLowerCase();
+  }
+
+  private emailEquals(email: string) {
+    return {
+      equals: this.normalizeEmail(email),
+      mode: 'insensitive' as const,
+    };
+  }
 
   // --- Fungsi untuk login (sudah ada) ---
   async validateUser(email: string, password: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { email },
+    const normalizedEmail = this.normalizeEmail(email);
+    const user = await this.prisma.user.findFirst({
+      where: { email: this.emailEquals(normalizedEmail) },
     });
 
     if (!user) {
@@ -62,7 +76,12 @@ export class AuthService {
     return user;
   }
 
-  async login(user: { id: string; email: string; role: string }) {
+  async login(user: {
+    id: string;
+    email: string;
+    role: string;
+    displayName?: string | null;
+  }) {
     const payload = { sub: user.id, email: user.email };
     return {
       message: 'Login berhasil',
@@ -71,6 +90,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         role: user.role,
+        displayName: user.displayName ?? null,
       },
     };
   }
@@ -83,6 +103,50 @@ export class AuthService {
         email: true,
         displayName: true,
         role: true,
+        studentProfile: {
+          select: {
+            nim: true,
+            angkatan: true,
+            kelas: true,
+            prodi: {
+              select: {
+                code: true,
+                name: true,
+              },
+            },
+          },
+        },
+        employeeProfile: {
+          select: {
+            nip: true,
+            nidn: true,
+            employeeType: true,
+            positionTitle: true,
+            homeUnit: {
+              select: {
+                code: true,
+                name: true,
+                type: true,
+              },
+            },
+          },
+        },
+        structuralAssignments: {
+          where: {
+            isActive: true,
+            endsAt: null,
+          },
+          select: {
+            position: true,
+            academicUnit: {
+              select: {
+                code: true,
+                name: true,
+                type: true,
+              },
+            },
+          },
+        },
         identity: {
           select: {
             status: true,
@@ -101,27 +165,109 @@ export class AuthService {
       displayName: user.displayName,
       role: user.role,
       identityStatus: user.identity?.status ?? null,
+      academicProfile: this.buildAcademicProfile(user),
     };
   }
 
+  private buildAcademicProfile(user: {
+    role: string;
+    studentProfile?: {
+      nim: string;
+      angkatan: number | null;
+      kelas: string | null;
+      prodi: { code: string; name: string };
+    } | null;
+    employeeProfile?: {
+      nip: string | null;
+      nidn: string | null;
+      employeeType: string;
+      positionTitle: string | null;
+      homeUnit: { code: string; name: string; type: string };
+    } | null;
+    structuralAssignments?: Array<{
+      position: string;
+      academicUnit: { code: string; name: string; type: string };
+    }>;
+  }) {
+    if (user.studentProfile) {
+      return {
+        type: 'STUDENT',
+        identifier: user.studentProfile.nim,
+        unitCode: user.studentProfile.prodi.code,
+        unitName: user.studentProfile.prodi.name,
+        unitType: 'PRODI',
+        angkatan: user.studentProfile.angkatan,
+        kelas: user.studentProfile.kelas,
+        positionTitle: null,
+        structuralPositions: [],
+      };
+    }
+
+    if (user.employeeProfile) {
+      return {
+        type: 'EMPLOYEE',
+        identifier: user.employeeProfile.nip ?? user.employeeProfile.nidn,
+        unitCode: user.employeeProfile.homeUnit.code,
+        unitName: user.employeeProfile.homeUnit.name,
+        unitType: user.employeeProfile.homeUnit.type,
+        employeeType: user.employeeProfile.employeeType,
+        positionTitle: user.employeeProfile.positionTitle,
+        structuralPositions: user.structuralAssignments ?? [],
+      };
+    }
+
+    return null;
+  }
+
   async updateProfile(userId: string, dto: UpdateProfileDto) {
-    const user = await this.prisma.user.update({
+    await this.prisma.user.update({
       where: { id: userId },
       data: {
         ...(dto.displayName !== undefined && { displayName: dto.displayName }),
-      },
-      select: {
-        id: true,
-        email: true,
-        displayName: true,
-        role: true,
       },
     });
 
     return {
       message: 'Profil berhasil diperbarui',
-      user,
+      user: await this.getProfile(userId),
     };
+  }
+
+  async changePassword(userId: string, dto: ChangePasswordDto) {
+    if (dto.newPassword !== dto.confirmPassword) {
+      throw new BadRequestException('Password baru dan konfirmasi tidak cocok');
+    }
+
+    if (dto.currentPassword === dto.newPassword) {
+      throw new BadRequestException('Password baru harus berbeda dari password lama');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, passwordHash: true },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User tidak ditemukan');
+    }
+
+    const currentPasswordValid = await bcrypt.compare(
+      dto.currentPassword,
+      user.passwordHash,
+    );
+
+    if (!currentPasswordValid) {
+      throw new UnauthorizedException('Password lama tidak sesuai');
+    }
+
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        passwordHash: await bcrypt.hash(dto.newPassword, 10),
+      },
+    });
+
+    return { message: 'Password berhasil diganti' };
   }
 
   // --- Fungsi untuk registrasi dengan OTP ---
@@ -131,9 +277,11 @@ export class AuthService {
 
   async requestOtp(email: string): Promise<void> {
     try {
+      const normalizedEmail = this.normalizeEmail(email);
+
       // Cek apakah email sudah terdaftar sebagai user
-      const existingUser = await this.prisma.user.findUnique({
-        where: { email },
+      const existingUser = await this.prisma.user.findFirst({
+        where: { email: this.emailEquals(normalizedEmail) },
       });
       if (existingUser) {
         throw new BadRequestException('Email sudah terdaftar');
@@ -142,13 +290,13 @@ export class AuthService {
       // Cek existing verification record untuk rate limiting
       let existingVerification = await this.prisma.emailVerification.findUnique(
         {
-          where: { email },
+          where: { email: normalizedEmail },
         },
       );
 
       // Rate limiting check untuk request OTP
       if (existingVerification) {
-        await this.rateLimitService.checkRequestOtpLimitWithRedis(email);
+        await this.rateLimitService.checkRequestOtpLimitWithRedis(normalizedEmail);
 
         this.rateLimitService.checkRequestOtpLimit(
           existingVerification.lastRequestAt,
@@ -156,7 +304,7 @@ export class AuthService {
           0,
         );
       } else {
-        await this.rateLimitService.checkRequestOtpLimitWithRedis(email);
+        await this.rateLimitService.checkRequestOtpLimitWithRedis(normalizedEmail);
       }
 
       // Generate dan hash OTP
@@ -166,7 +314,7 @@ export class AuthService {
 
       // Upsert dengan update lastRequestAt
       existingVerification = await this.prisma.emailVerification.upsert({
-        where: { email },
+        where: { email: normalizedEmail },
         update: {
           otp: hashedOtp,
           expiresAt,
@@ -178,7 +326,7 @@ export class AuthService {
           lastRequestAt: new Date(), // Track request time
         },
         create: {
-          email,
+          email: normalizedEmail,
           otp: hashedOtp,
           expiresAt,
           lastRequestAt: new Date(),
@@ -187,11 +335,11 @@ export class AuthService {
 
       // Kirim email
       try {
-        await this.emailService.sendOtpEmail(email, otp);
-        this.logger.debug(`OTP email sent successfully to ${email}`);
+        await this.emailService.sendOtpEmail(normalizedEmail, otp);
+        this.logger.debug(`OTP email sent successfully to ${normalizedEmail}`);
       } catch (error) {
         this.logger.error(
-          `Failed to send OTP email to ${email}`,
+          `Failed to send OTP email to ${normalizedEmail}`,
           error instanceof Error ? error.message : error,
         );
         throw new BadRequestException('Gagal mengirim email, coba lagi nanti');
@@ -209,8 +357,9 @@ export class AuthService {
 
   async verifyOtp(email: string, otp: string): Promise<{ message: string }> {
     try {
+      const normalizedEmail = this.normalizeEmail(email);
       const record = await this.prisma.emailVerification.findUnique({
-        where: { email },
+        where: { email: normalizedEmail },
       });
 
       if (!record) {
@@ -246,7 +395,7 @@ export class AuthService {
           newAttemptCount >= this.rateLimitService.maxVerifyAttempts;
 
         await this.prisma.emailVerification.update({
-          where: { email },
+          where: { email: normalizedEmail },
           data: {
             attemptCount: newAttemptCount,
             lastAttemptAt: new Date(),
@@ -267,7 +416,7 @@ export class AuthService {
 
       // OTP valid - reset attempt counter dan set verified
       await this.prisma.emailVerification.update({
-        where: { email },
+        where: { email: normalizedEmail },
         data: {
           verified: true,
           attemptCount: 0,
@@ -276,7 +425,7 @@ export class AuthService {
         },
       });
 
-      this.logger.debug(`Email ${email} verified successfully`);
+      this.logger.debug(`Email ${normalizedEmail} verified successfully`);
 
       return { message: 'OTP valid, silakan lanjutkan registrasi' };
     } catch (error) {
@@ -288,14 +437,34 @@ export class AuthService {
     }
   }
 
-  async register(email: string, password: string, confirmPassword: string) {
-    if (password !== confirmPassword) {
+  async getRegisterOptions() {
+    const prodi = await this.prisma.academicUnit.findMany({
+      where: {
+        type: 'PRODI',
+        isActive: true,
+      },
+      orderBy: { name: 'asc' },
+      select: {
+        id: true,
+        code: true,
+        name: true,
+        parentId: true,
+      },
+    });
+
+    return { prodi };
+  }
+
+  async register(dto: RegisterDto) {
+    if (dto.password !== dto.confirmPassword) {
       throw new BadRequestException('Password dan konfirmasi tidak cocok');
     }
 
+    const normalizedEmail = this.normalizeEmail(dto.email);
+
     const verification = await this.prisma.emailVerification.findFirst({
       where: {
-        email,
+        email: normalizedEmail,
         verified: true,
       },
     });
@@ -305,28 +474,64 @@ export class AuthService {
     }
 
     // Cek ulang apakah user sudah ada (antisipasi race condition)
-    const existingUser = await this.prisma.user.findUnique({
-      where: { email },
+    const existingUser = await this.prisma.user.findFirst({
+      where: { email: this.emailEquals(normalizedEmail) },
     });
     if (existingUser) {
       throw new BadRequestException('Email sudah terdaftar');
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    // Buat user beserta role default USER
-    const user = await this.prisma.user.create({
-      data: {
-        email,
-        passwordHash: hashedPassword,
-        status: 'ACTIVE',
-        emailVerifiedAt: new Date(),
-        role: 'MEMBER',
-      },
+    const existingNim = await this.prisma.studentProfile.findUnique({
+      where: { nim: dto.nim },
+      select: { id: true },
     });
 
-    // Hapus record verifikasi (sudah tidak diperlukan)
-    await this.prisma.emailVerification.delete({ where: { email } });
+    if (existingNim) {
+      throw new BadRequestException('NIM sudah terdaftar');
+    }
+
+    const prodi = await this.prisma.academicUnit.findFirst({
+      where: {
+        id: dto.prodiId,
+        type: 'PRODI',
+        isActive: true,
+      },
+      select: { id: true },
+    });
+
+    if (!prodi) {
+      throw new BadRequestException('Program studi tidak valid atau tidak aktif');
+    }
+
+    const hashedPassword = await bcrypt.hash(dto.password, 10);
+
+    // Registrasi mandiri default untuk mahasiswa. Role struktural dibuat oleh seed/admin.
+    const user = await this.prisma.$transaction(async (tx) => {
+      const createdUser = await tx.user.create({
+        data: {
+          email: normalizedEmail,
+          displayName: dto.displayName.trim(),
+          passwordHash: hashedPassword,
+          status: 'ACTIVE',
+          emailVerifiedAt: new Date(),
+          role: 'MAHASISWA',
+        },
+      });
+
+      await tx.studentProfile.create({
+        data: {
+          userId: createdUser.id,
+          nim: dto.nim,
+          prodiId: dto.prodiId,
+          angkatan: dto.angkatan ?? null,
+          kelas: dto.kelas?.trim() || null,
+        },
+      });
+
+      await tx.emailVerification.delete({ where: { email: normalizedEmail } });
+
+      return createdUser;
+    });
 
     // Generate JWT token
     const payload = { sub: user.id, email: user.email };
@@ -339,6 +544,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         role: user.role,
+        displayName: user.displayName,
       },
     };
   }

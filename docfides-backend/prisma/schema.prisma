@@ -8,20 +8,21 @@
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
 generator client {
-  provider = "prisma-client"
+  provider = "prisma-client-js"
   output   = "../generated/prisma"
-  moduleFormat = "cjs"
 }
 
 datasource db {
   provider = "postgresql"
 }
 
-// Enum untuk role user (tanpa tabel terpisah)
 enum Role {
-  MEMBER
-  VERIFIER
-  ADMIN // Opsional, jika masih diperlukan
+  SUPERADMIN
+  JURUSAN
+  PRODI
+  ADMIN_PRODI
+  PEGAWAI
+  MAHASISWA
 }
 
 enum UserStatus {
@@ -47,6 +48,23 @@ enum SignaturePreference {
   INVISIBLE
 }
 
+enum AcademicUnitType {
+  JURUSAN
+  PRODI
+}
+
+enum EmploymentType {
+  DOSEN
+  TENAGA_KEPENDIDIKAN
+  ADMINISTRASI
+}
+
+enum StructuralPosition {
+  KAJUR
+  KAPRODI
+  ADMIN_PRODI
+}
+
 model User {
   id              String   @id @default(uuid())
   
@@ -60,7 +78,7 @@ model User {
   emailVerifiedAt DateTime?
 
   status          UserStatus @default(ACTIVE)
-  role            Role       @default(MEMBER) 
+  role            Role       @default(MAHASISWA) 
 
   preferredSignatureMode SignaturePreference @default(INVISIBLE)
 
@@ -71,13 +89,93 @@ model User {
   deletedAt       DateTime?  
 
   identity        Identity?
+  studentProfile  StudentProfile?
+  employeeProfile EmployeeProfile?
+  structuralAssignments StructuralAssignment[]
   certificates    Certificate[]
 
   ownedDocuments  Document[]      // Dokumen yang dibuat user (pemilik)
+  revokedDocuments Document[]     @relation("DocumentRevokedBy")
   documentSigners DocumentSigner[] // Relasi ke peran penandatangan
   signatures      Signature[]     // Tanda tangan yang dilakukan user
 
   @@map("users")
+}
+
+model AcademicUnit {
+  id          String           @id @default(uuid())
+  code        String           @unique
+  name        String
+  type        AcademicUnitType
+  parentId    String?
+  parent      AcademicUnit?    @relation("AcademicUnitHierarchy", fields: [parentId], references: [id], onDelete: Restrict)
+  children    AcademicUnit[]   @relation("AcademicUnitHierarchy")
+  isActive    Boolean          @default(true)
+
+  studentProfiles       StudentProfile[]
+  employeeProfiles      EmployeeProfile[]
+  structuralAssignments StructuralAssignment[]
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([type])
+  @@index([parentId])
+  @@map("academic_units")
+}
+
+model StudentProfile {
+  id        String       @id @default(uuid())
+  userId    String       @unique
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nim       String       @unique
+  prodiId   String
+  prodi     AcademicUnit @relation(fields: [prodiId], references: [id], onDelete: Restrict)
+  angkatan  Int?
+  kelas     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([prodiId])
+  @@map("student_profiles")
+}
+
+model EmployeeProfile {
+  id              String         @id @default(uuid())
+  userId          String         @unique
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  nip             String?        @unique
+  nidn            String?        @unique
+  employeeType    EmploymentType @default(DOSEN)
+  homeUnitId      String
+  homeUnit        AcademicUnit   @relation(fields: [homeUnitId], references: [id], onDelete: Restrict)
+  positionTitle   String?
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([homeUnitId])
+  @@map("employee_profiles")
+}
+
+model StructuralAssignment {
+  id             String             @id @default(uuid())
+  userId         String
+  user           User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  academicUnitId String
+  academicUnit   AcademicUnit       @relation(fields: [academicUnitId], references: [id], onDelete: Restrict)
+  position       StructuralPosition
+  startsAt       DateTime           @default(now())
+  endsAt         DateTime?
+  isActive       Boolean            @default(true)
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([userId, academicUnitId, position])
+  @@index([academicUnitId, position])
+  @@map("structural_assignments")
 }
 
 model Identity {
@@ -188,6 +286,16 @@ model Document {
   finalFileSize       Int?             // Ukuran file final
   finalFileIpfsHash   String?          // Jika disimpan di IPFS
 
+  qrCodePage          Int?
+  qrCodeX             Float?
+  qrCodeY             Float?
+  qrCodeWidth         Float?
+  qrCodeHeight        Float?
+
+  revokedAt           DateTime?
+  revokedById         String?
+  revokedBy           User?           @relation("DocumentRevokedBy", fields: [revokedById], references: [id], onDelete: SetNull)
+  revokeReason        String?
 
   status              DocumentStatus  @default(DRAFT)
 
@@ -199,6 +307,7 @@ model Document {
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
 
+  @@index([revokedById])
   @@map("documents")
 }
 
@@ -211,6 +320,8 @@ model DocumentSigner {
 
   status              SignerStatus   @default(PENDING)
   signedAt            DateTime?      // Waktu saat menandatangani
+  declinedAt          DateTime?
+  declineReason       String?
   signatureId         String?        @unique // Jika sudah signed, tautkan ke Signature
   signature           Signature?     @relation(fields: [signatureId], references: [id])
 

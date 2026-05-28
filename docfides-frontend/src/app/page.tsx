@@ -3,7 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
-import { getToken } from '@/lib/auth-service';
+import { getDefaultHomePath, getToken, getUser } from '@/lib/auth-service';
 
 export default function HomePage() {
     const router = useRouter();
@@ -11,7 +11,7 @@ export default function HomePage() {
     useEffect(() => {
         const token = getToken();
         if (token) {
-            router.replace('/dashboard');
+            router.replace(getDefaultHomePath(getUser()));
             return;
         }
 

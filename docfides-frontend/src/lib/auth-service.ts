@@ -3,8 +3,10 @@ import {
     RequestOtpDto,
     VerifyOtpDto,
     RegisterDto,
+    RegisterOptionsResponse,
     LoginDto,
     AuthResponse,
+    ChangePasswordPayload,
     OtpResponse,
     User,
     IdentityStatusResponse,
@@ -19,6 +21,9 @@ import {
     SignatureStatusResponse,
     SignDocumentPayload,
     SignDocumentResponse,
+    FinalizeQrPayload,
+    FinalizeQrResponse,
+    DeclineDocumentPayload,
     RequestSignersPayload,
     RequestSignersResponse,
     UploadDocumentResponse,
@@ -26,13 +31,33 @@ import {
     AssignedDocumentsResponse,
     SignerCandidatesResponse,
     DocumentSignerPlaceholdersResponse,
+    AdminOverviewResponse,
+    AdminAcademicUnitsResponse,
+    AdminAcademicUnit,
+    CreateAdminAcademicUnitPayload,
+    UpdateAdminAcademicUnitPayload,
+    AdminUsersResponse,
+    AdminUserItem,
+    CreateAdminUserPayload,
+    UpdateAdminUserPayload,
+    AdminIdentitiesResponse,
+    AdminDocumentsResponse,
+    RevokeAdminDocumentPayload,
+    RevokeAdminDocumentResponse,
+    IpfsStatusResponse,
+    UpdateProfilePayload,
 } from '@/types/auth';
+
+const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
 /**
  * Request OTP untuk email tertentu
  */
 export const requestOtp = async (dto: RequestOtpDto): Promise<OtpResponse> => {
-    const response = await api.post<OtpResponse>('/auth/request-otp', dto);
+    const response = await api.post<OtpResponse>('/auth/request-otp', {
+        ...dto,
+        email: normalizeEmail(dto.email),
+    });
     return response.data;
 };
 
@@ -40,7 +65,10 @@ export const requestOtp = async (dto: RequestOtpDto): Promise<OtpResponse> => {
  * Verify OTP yang dikirim ke email
  */
 export const verifyOtp = async (dto: VerifyOtpDto): Promise<OtpResponse> => {
-    const response = await api.post<OtpResponse>('/auth/verify-otp', dto);
+    const response = await api.post<OtpResponse>('/auth/verify-otp', {
+        ...dto,
+        email: normalizeEmail(dto.email),
+    });
     return response.data;
 };
 
@@ -50,7 +78,10 @@ export const verifyOtp = async (dto: VerifyOtpDto): Promise<OtpResponse> => {
 export const register = async (
     dto: RegisterDto,
 ): Promise<AuthResponse> => {
-    const response = await api.post<AuthResponse>('/auth/register', dto);
+    const response = await api.post<AuthResponse>('/auth/register', {
+        ...dto,
+        email: normalizeEmail(dto.email),
+    });
     return response.data;
 };
 
@@ -58,7 +89,10 @@ export const register = async (
  * Login user
  */
 export const login = async (dto: LoginDto): Promise<AuthResponse> => {
-    const response = await api.post<AuthResponse>('/auth/login', dto);
+    const response = await api.post<AuthResponse>('/auth/login', {
+        ...dto,
+        email: normalizeEmail(dto.email),
+    });
     return response.data;
 };
 
@@ -82,6 +116,12 @@ export const getToken = (): string | null => {
     return null;
 };
 
+export const getDefaultHomePath = (user: User | null): string => {
+    if (user?.role === 'SUPERADMIN') return '/admin';
+    if (user?.role === 'ADMIN_PRODI') return '/admin-prodi';
+    return '/dashboard';
+};
+
 /**
  * Get stored user
  */
@@ -103,6 +143,30 @@ export const saveAuthData = (token: string, user: User): void => {
     }
 };
 
+export const getProfile = async (): Promise<User> => {
+    const response = await api.get<User>('/auth/me');
+    return response.data;
+};
+
+export const getRegisterOptions = async (): Promise<RegisterOptionsResponse> => {
+    const response = await api.get<RegisterOptionsResponse>('/auth/register-options');
+    return response.data;
+};
+
+export const updateProfile = async (
+    payload: UpdateProfilePayload,
+): Promise<{ message: string; user: User }> => {
+    const response = await api.patch<{ message: string; user: User }>('/auth/profile', payload);
+    return response.data;
+};
+
+export const changePassword = async (
+    payload: ChangePasswordPayload,
+): Promise<{ message: string }> => {
+    const response = await api.patch<{ message: string }>('/auth/password', payload);
+    return response.data;
+};
+
 export const getIdentityStatus = async (): Promise<IdentityStatusResponse> => {
     const response = await api.get<IdentityStatusResponse>('/identity/status');
     return response.data;
@@ -120,9 +184,7 @@ export const submitIdentity = async (
     const formData = new FormData();
     formData.append('nik', dto.nik);
     formData.append('fullName', dto.fullName);
-    if (dto.birthPlace) {
-        formData.append('birthPlace', dto.birthPlace);
-    }
+    formData.append('birthPlace', dto.birthPlace);
     formData.append('birthDate', dto.birthDate);
     formData.append('address', dto.address);
 
@@ -188,6 +250,11 @@ export const updateSignaturePreference = async (
 
 export const getSignatureStatus = async (): Promise<SignatureStatusResponse> => {
     const response = await api.get<SignatureStatusResponse>('/certification/signature/me');
+    return response.data;
+};
+
+export const getIpfsStatus = async (): Promise<IpfsStatusResponse> => {
+    const response = await api.get<IpfsStatusResponse>('/certification/ipfs/status');
     return response.data;
 };
 
@@ -260,6 +327,28 @@ export const signDocumentCertification = async (
     return response.data;
 };
 
+export const finalizeDocumentQr = async (
+    documentId: string,
+    payload: FinalizeQrPayload,
+): Promise<FinalizeQrResponse> => {
+    const response = await api.post<FinalizeQrResponse>(
+        `/certification/documents/${documentId}/finalize-qr`,
+        payload,
+    );
+    return response.data;
+};
+
+export const declineDocumentCertification = async (
+    documentId: string,
+    payload: DeclineDocumentPayload,
+): Promise<{ message: string }> => {
+    const response = await api.post<{ message: string }>(
+        `/certification/documents/${documentId}/decline`,
+        payload,
+    );
+    return response.data;
+};
+
 export const requestDocumentSigners = async (
     documentId: string,
     payload: RequestSignersPayload,
@@ -290,5 +379,142 @@ export const reviewIdentity = async (
     dto: ReviewIdentityDto,
 ): Promise<{ message: string }> => {
     const response = await api.patch<{ message: string }>(`/identity/${userId}/review`, dto);
+    return response.data;
+};
+
+export const getIdentityKtpFile = async (userId: string): Promise<Blob> => {
+    const response = await api.get(`/identity/${userId}/ktp`, {
+        responseType: 'blob',
+    });
+    return response.data as Blob;
+};
+
+export const getAdminOverview = async (): Promise<AdminOverviewResponse> => {
+    const response = await api.get<AdminOverviewResponse>('/admin/overview');
+    return response.data;
+};
+
+export const listAdminAcademicUnits = async (): Promise<AdminAcademicUnitsResponse> => {
+    const response = await api.get<AdminAcademicUnitsResponse>('/admin/academic-units');
+    return response.data;
+};
+
+export const getAdminAcademicUnit = async (
+    unitId: string,
+): Promise<{ unit: AdminAcademicUnit }> => {
+    const response = await api.get<{ unit: AdminAcademicUnit }>(`/admin/academic-units/${unitId}`);
+    return response.data;
+};
+
+export const createAdminAcademicUnit = async (
+    payload: CreateAdminAcademicUnitPayload,
+): Promise<{ unit: AdminAcademicUnit }> => {
+    const response = await api.post<{ unit: AdminAcademicUnit }>('/admin/academic-units', payload);
+    return response.data;
+};
+
+export const updateAdminAcademicUnit = async (
+    unitId: string,
+    payload: UpdateAdminAcademicUnitPayload,
+): Promise<{ unit: AdminAcademicUnit }> => {
+    const response = await api.patch<{ unit: AdminAcademicUnit }>(
+        `/admin/academic-units/${unitId}`,
+        payload,
+    );
+    return response.data;
+};
+
+export const deleteAdminAcademicUnit = async (
+    unitId: string,
+): Promise<{ unit: AdminAcademicUnit; message: string }> => {
+    const response = await api.delete<{ unit: AdminAcademicUnit; message: string }>(
+        `/admin/academic-units/${unitId}`,
+    );
+    return response.data;
+};
+
+export const listAdminUsers = async (): Promise<AdminUsersResponse> => {
+    const response = await api.get<AdminUsersResponse>('/admin/users');
+    return response.data;
+};
+
+export const getAdminUser = async (
+    userId: string,
+): Promise<{ user: AdminUserItem }> => {
+    const response = await api.get<{ user: AdminUserItem }>(`/admin/users/${userId}`);
+    return response.data;
+};
+
+export const createAdminUser = async (
+    payload: CreateAdminUserPayload,
+): Promise<{ user: AdminUserItem }> => {
+    const response = await api.post<{ user: AdminUserItem }>('/admin/users', {
+        ...payload,
+        email: normalizeEmail(payload.email),
+    });
+    return response.data;
+};
+
+export const updateAdminUser = async (
+    userId: string,
+    payload: UpdateAdminUserPayload,
+): Promise<{ user: AdminUserItem }> => {
+    const response = await api.patch<{ user: AdminUserItem }>(`/admin/users/${userId}`, payload);
+    return response.data;
+};
+
+export const deleteAdminUser = async (
+    userId: string,
+): Promise<{ user: AdminUserItem; message: string }> => {
+    const response = await api.delete<{ user: AdminUserItem; message: string }>(
+        `/admin/users/${userId}`,
+    );
+    return response.data;
+};
+
+export const resetAdminUserPassword = async (
+    userId: string,
+    password?: string,
+): Promise<{ message: string }> => {
+    const response = await api.patch<{ message: string }>(`/admin/users/${userId}/password`, {
+        password,
+    });
+    return response.data;
+};
+
+export const listAdminIdentities = async (): Promise<AdminIdentitiesResponse> => {
+    const response = await api.get<AdminIdentitiesResponse>('/admin/identities');
+    return response.data;
+};
+
+export const reviewAdminIdentity = async (
+    userId: string,
+    payload: ReviewIdentityDto,
+): Promise<{ message: string }> => {
+    const response = await api.patch<{ message: string }>(`/admin/identities/${userId}/review`, payload);
+    return response.data;
+};
+
+export const listAdminDocuments = async (): Promise<AdminDocumentsResponse> => {
+    const response = await api.get<AdminDocumentsResponse>('/admin/documents');
+    return response.data;
+};
+
+export const getAdminDocumentFile = async (documentId: string): Promise<Blob> => {
+    const response = await api.get(`/admin/documents/${documentId}/file`, {
+        responseType: 'blob',
+    });
+
+    return response.data as Blob;
+};
+
+export const revokeAdminDocument = async (
+    documentId: string,
+    payload: RevokeAdminDocumentPayload,
+): Promise<RevokeAdminDocumentResponse> => {
+    const response = await api.delete<RevokeAdminDocumentResponse>(
+        `/admin/documents/${documentId}`,
+        { data: payload },
+    );
     return response.data;
 };

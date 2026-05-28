@@ -2,12 +2,11 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, AlertCircle, Lock, Mail, Eye, EyeOff } from 'lucide-react';
-import { login, saveAuthData } from '@/lib/auth-service';
+import {
+  Loader2, AlertCircle, Eye, EyeOff, ShieldCheck, Mail, Lock,
+} from 'lucide-react';
+import { getDefaultHomePath, login, saveAuthData } from '@/lib/auth-service';
 import Link from 'next/link';
 import { AxiosError } from 'axios';
 
@@ -26,130 +25,165 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    const normalizedEmail = email.trim().toLowerCase();
 
-    // Validation
-    if (!email || !password) {
+    if (!normalizedEmail || !password) {
       setError('Email dan password tidak boleh kosong');
       return;
     }
-
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
       setError('Format email tidak valid');
       return;
     }
 
     setLoading(true);
-
     try {
-      const response = await login({ email, password });
-
-      // Save auth data
+      const response = await login({ email: normalizedEmail, password });
       saveAuthData(response.access_token, response.user);
-
-      // Redirect to dashboard
-      router.push('/dashboard');
+      router.push(getDefaultHomePath(response.user));
     } catch (err: unknown) {
-      const error = err as AxiosError<ApiError>;
-      const responseMessage = error.response?.data?.message;
-      const normalizedMessage = Array.isArray(responseMessage)
-        ? responseMessage.join(', ')
-        : responseMessage;
-      setError(normalizedMessage ?? error.message ?? 'Login gagal. Silakan coba lagi.');
+      const axiosErr = err as AxiosError<ApiError>;
+      const msg = axiosErr.response?.data?.message;
+      const normalized = Array.isArray(msg) ? msg.join(', ') : msg;
+      setError(normalized ?? axiosErr.message ?? 'Login gagal. Silakan coba lagi.');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-8">
-      <div className="mx-auto grid min-h-[calc(100vh-2rem)] w-full max-w-6xl grid-cols-1 gap-6 lg:grid-cols-2">
-        <section className="hidden rounded-2xl bg-slate-900 p-8 text-white lg:flex lg:flex-col lg:justify-between">
+    <div
+      className="flex min-h-screen items-center justify-center bg-blue-50 px-4 py-12"
+      style={{ background: 'linear-gradient(135deg, #dbeafe 0%, #eff6ff 50%, #e0e7ff 100%)' }}
+    >
+      {/* Blob decorations */}
+      <div className="pointer-events-none fixed -top-24 -left-24 h-72 w-72 rounded-full bg-blue-300/40 blur-3xl" />
+      <div className="pointer-events-none fixed -bottom-24 -right-24 h-72 w-72 rounded-full bg-blue-400/30 blur-3xl" />
+
+      {/* Card container */}
+      <div className="relative z-10 w-full max-w-[800px] overflow-hidden rounded-3xl bg-white shadow-2xl shadow-blue-200/60 flex min-h-[480px]">
+
+        {/* ── Left: Info Panel ── */}
+        <div className="hidden lg:flex lg:w-[45%] flex-col justify-between bg-blue-600 p-10 text-white">
+          {/* Brand */}
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20">
+              <ShieldCheck className="h-4 w-4 text-white" />
+            </div>
+            <span className="text-sm font-bold">DoChain</span>
+          </div>
+
+          {/* Headline */}
           <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-slate-400">DoChain Platform</p>
-            <h1 className="mt-4 text-4xl font-semibold leading-tight"></h1>
-            
+            <h1 className="text-2xl font-extrabold leading-snug">
+              Sertifikasi dokumen resmi berbasis blockchain.
+            </h1>
+            <p className="mt-3 text-sm text-blue-100 leading-relaxed">
+              Platform terpercaya untuk menandatangani dan memverifikasi dokumen akademik menggunakan Hyperledger Besu & IPFS.
+            </p>
           </div>
-          <div className="space-y-2 text-sm text-slate-300">
-           
+
+          {/* Footer */}
+          <p className="text-xs text-blue-300">© 2026 DoChain</p>
+        </div>
+
+        {/* ── Right: Form Panel ── */}
+        <div className="flex flex-1 flex-col items-center justify-center px-8 py-10">
+
+          {/* Logo (mobile + desktop) */}
+          <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50">
+            <ShieldCheck className="h-7 w-7 text-blue-600" />
           </div>
-        </section>
 
-        <section className="flex items-center justify-center rounded-2xl border border-slate-200 bg-white p-4 shadow-sm md:p-8">
-          <div className="w-full max-w-md">
-            <Card className="border-none shadow-none">
-              <CardHeader className="px-0">
-                <CardTitle className="flex items-center gap-2 text-2xl">
-                  <Lock className="h-5 w-5" />
-                  Sign In
-                </CardTitle>
-                <CardDescription>Use your email and password to access your workspace.</CardDescription>
-              </CardHeader>
+          <h2 className="text-xl font-bold text-gray-900 mb-8">Selamat Datang!</h2>
+          {/* Error */}
+          {error && (
+            <div className="mb-4 flex w-full items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-3">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
+              <p className="text-xs font-medium text-red-700">{error}</p>
+            </div>
+          )}
 
-              <CardContent className="px-0">
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  {error && (
-                    <Alert className="border-red-200 bg-red-50">
-                      <AlertCircle className="h-4 w-4 text-red-600" />
-                      <AlertDescription className="text-red-800">{error}</AlertDescription>
-                    </Alert>
-                  )}
+          {/* Form */}
+          <form onSubmit={handleSubmit} className="w-full space-y-3">
+            {/* Email */}
+            <div className="relative">
+              <Input
+                id="email"
+                type="email"
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                disabled={loading}
+                className="h-12 rounded-xl border-gray-200 bg-gray-50 pl-4 pr-10 text-sm focus:border-blue-500 focus:bg-white focus:ring-0"
+              />
+              <Mail className="absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            </div>
 
-                  <div className="space-y-2">
-                    <label htmlFor="email" className="text-sm font-medium text-slate-700">Email</label>
-                    <div className="relative">
-                      <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <Input
-                        id="email"
-                        type="email"
-                        placeholder="name@example.com"
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                        disabled={loading}
-                        className="pl-10"
-                      />
-                    </div>
-                  </div>
+            {/* Password */}
+            <div className="relative">
+              <Input
+                id="password"
+                type={showPassword ? 'text' : 'password'}
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={loading}
+                className="h-12 rounded-xl border-gray-200 bg-gray-50 pl-4 pr-10 text-sm focus:border-blue-500 focus:bg-white focus:ring-0"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                aria-label={showPassword ? 'Sembunyikan' : 'Tampilkan'}
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
 
-                  <div className="space-y-2">
-                    <label htmlFor="password" className="text-sm font-medium text-slate-700">Password</label>
-                    <div className="relative">
-                      <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <Input
-                        id="password"
-                        type={showPassword ? 'text' : 'password'}
-                        placeholder="••••••••"
-                        value={password}
-                        onChange={(e) => setPassword(e.target.value)}
-                        disabled={loading}
-                        className="pl-10 pr-10"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowPassword(!showPassword)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
-                        aria-label={showPassword ? 'Hide password' : 'Show password'}
-                      >
-                        {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                      </button>
-                    </div>
-                  </div>
+            {/* Remember + Forgot */}
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" className="h-3.5 w-3.5 rounded border-gray-300 accent-blue-600" />
+                <span className="text-xs text-gray-500">Ingat saya</span>
+              </label>
+              <span className="text-xs font-medium text-blue-600 cursor-pointer hover:text-blue-700">
+                Lupa password?
+              </span>
+            </div>
 
-                  <Button type="submit" disabled={loading || !email || !password} className="w-full" size="lg">
-                    {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    {loading ? 'Signing in...' : 'Sign In'}
-                  </Button>
+            {/* Login button */}
+            <button
+              type="submit"
+              id="login-btn"
+              disabled={loading || !email || !password}
+              className="flex h-12 w-full items-center justify-center rounded-xl bg-blue-600 text-sm font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {loading ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Memverifikasi...</>
+              ) : (
+                <><Lock className="mr-2 h-4 w-4" /> Masuk ke DoChain</>
+              )}
+            </button>
 
-                  <p className="text-center text-sm text-slate-600">
-                    Don&apos;t have an account?{' '}
-                    <Link href="/register" className="font-medium text-blue-600 hover:text-blue-500">
-                      Register
-                    </Link>
-                  </p>
-                </form>
-              </CardContent>
-            </Card>
-          </div>
-        </section>
+            {/* Divider */}
+            <div className="relative my-1 flex items-center">
+              <div className="flex-1 border-t border-gray-200" />
+              <span className="px-3 text-xs text-gray-400">atau</span>
+              <div className="flex-1 border-t border-gray-200" />
+            </div>
+
+            {/* Register outline button */}
+            <Link
+              href="/register"
+              id="register-link"
+              className="flex h-12 w-full items-center justify-center rounded-xl border border-gray-200 bg-white text-sm font-semibold text-gray-700 transition-all hover:border-blue-300 hover:text-blue-700"
+            >
+              <ShieldCheck className="mr-2 h-4 w-4 text-blue-500" />
+              Daftar Akun Baru
+            </Link>
+          </form>
+        </div>
       </div>
     </div>
   );

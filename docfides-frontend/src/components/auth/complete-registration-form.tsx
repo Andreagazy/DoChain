@@ -1,8 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { AxiosError } from 'axios';
+import { AlertCircle, Eye, EyeOff, GraduationCap, Hash, Loader2, Lock, Mail, User } from 'lucide-react';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import {
     Card,
     CardContent,
@@ -10,12 +14,9 @@ import {
     CardHeader,
     CardTitle,
 } from '@/components/ui/card';
-import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, AlertCircle, Eye, EyeOff, Lock, Mail } from 'lucide-react';
-import { register, saveAuthData } from '@/lib/auth-service';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { AxiosError } from 'axios';
+import { Input } from '@/components/ui/input';
+import { getRegisterOptions, register, saveAuthData } from '@/lib/auth-service';
+import type { RegisterOptionsResponse } from '@/types/auth';
 
 type ApiError = {
     message?: string | string[];
@@ -25,43 +26,93 @@ interface CompleteRegistrationFormProps {
     email: string;
 }
 
-export default function CompleteRegistrationForm({
-    email,
-}: CompleteRegistrationFormProps) {
+const onlyDigits = (value: string) => value.replace(/\D/g, '');
+const currentYear = new Date().getFullYear();
+
+export default function CompleteRegistrationForm({ email }: CompleteRegistrationFormProps) {
     const router = useRouter();
+    const [options, setOptions] = useState<RegisterOptionsResponse>({ prodi: [] });
+    const [displayName, setDisplayName] = useState('');
+    const [nim, setNim] = useState('');
+    const [prodiId, setProdiId] = useState('');
+    const [angkatan, setAngkatan] = useState('');
+    const [kelas, setKelas] = useState('');
     const [password, setPassword] = useState('');
     const [confirmPassword, setConfirmPassword] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirmPassword, setShowConfirmPassword] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [loadingOptions, setLoadingOptions] = useState(true);
     const [error, setError] = useState('');
 
+    useEffect(() => {
+        async function loadOptions() {
+            try {
+                const response = await getRegisterOptions();
+                setOptions(response);
+                setProdiId(response.prodi[0]?.id ?? '');
+            } catch (err) {
+                setError(normalizeErrorMessage(err));
+            } finally {
+                setLoadingOptions(false);
+            }
+        }
+
+        void loadOptions();
+    }, []);
+
+    const normalizeErrorMessage = (err: unknown) => {
+        const error = err as AxiosError<ApiError>;
+        const responseMessage = error.response?.data?.message;
+        return Array.isArray(responseMessage)
+            ? responseMessage.join(', ')
+            : responseMessage ?? error.message ?? 'Registrasi gagal. Silakan coba lagi.';
+    };
+
     const validateForm = (): boolean => {
+        if (displayName.trim().length < 2) {
+            setError('Nama lengkap wajib diisi minimal 2 karakter.');
+            return false;
+        }
+
+        if (!nim || nim.length < 5) {
+            setError('NIM wajib diisi dengan angka.');
+            return false;
+        }
+
+        if (!prodiId) {
+            setError('Pilih program studi terlebih dahulu.');
+            return false;
+        }
+
+        if (angkatan) {
+            const year = Number(angkatan);
+            if (Number.isNaN(year) || year < 2000 || year > currentYear + 1) {
+                setError(`Angkatan harus antara 2000 sampai ${currentYear + 1}.`);
+                return false;
+            }
+        }
+
         if (!password) {
-            setError('Password tidak boleh kosong');
+            setError('Password tidak boleh kosong.');
             return false;
         }
 
         if (password.length < 8) {
-            setError('Password harus minimal 8 karakter');
-            return false;
-        }
-
-        if (!confirmPassword) {
-            setError('Konfirmasi password tidak boleh kosong');
+            setError('Password harus minimal 8 karakter.');
             return false;
         }
 
         if (password !== confirmPassword) {
-            setError('Password dan konfirmasi tidak cocok');
+            setError('Password dan konfirmasi tidak cocok.');
             return false;
         }
 
         return true;
     };
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
+    const handleSubmit = async (event: React.FormEvent) => {
+        event.preventDefault();
         setError('');
 
         if (!validateForm()) {
@@ -75,145 +126,219 @@ export default function CompleteRegistrationForm({
                 email,
                 password,
                 confirmPassword,
+                displayName: displayName.trim(),
+                nim,
+                prodiId,
+                ...(angkatan && { angkatan: Number(angkatan) }),
+                ...(kelas.trim() && { kelas: kelas.trim().toUpperCase() }),
             });
 
-            // Save auth data
             saveAuthData(response.access_token, response.user);
-
-            // Redirect to dashboard
             router.push('/dashboard');
         } catch (err: unknown) {
-            const error = err as AxiosError<ApiError>;
-            const responseMessage = error.response?.data?.message;
-            const normalizedMessage = Array.isArray(responseMessage)
-                ? responseMessage.join(', ')
-                : responseMessage;
-            setError(normalizedMessage ?? error.message ?? 'Registrasi gagal. Silakan coba lagi.');
+            setError(normalizeErrorMessage(err));
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <Card className="w-full max-w-md">
-            <CardHeader className="space-y-2">
-                <CardTitle className="flex items-center gap-2">
-                    <Lock className="w-5 h-5" />
-                    Buat Password
+        <Card className="w-full border-none bg-transparent shadow-none">
+            <CardHeader className="px-0 pt-0 pb-6">
+                <CardTitle className="text-3xl font-extrabold tracking-tight text-slate-900">
+                    Daftar Mahasiswa
                 </CardTitle>
-                <CardDescription>
-                    Lanjutkan registrasi untuk akun <br />
-                    <span className="font-semibold text-foreground">{email}</span>
+                <CardDescription className="mt-1 text-slate-500">
+                    Register publik hanya untuk mahasiswa. Role pegawai, admin prodi, kaprodi, kajur, dan superadmin dibuat oleh admin sistem.
                 </CardDescription>
             </CardHeader>
 
-            <CardContent>
-                <form onSubmit={handleSubmit} className="space-y-4">
-                    {/* Error Alert */}
-                    {error && (
-                        <Alert className="border-red-200 bg-red-50 dark:bg-red-900/20">
+            <CardContent className="px-0">
+                <form onSubmit={handleSubmit} className="space-y-5">
+                    {error ? (
+                        <Alert className="rounded-xl border-red-200 bg-red-50/80 shadow-sm">
                             <AlertCircle className="h-4 w-4 text-red-600" />
-                            <AlertDescription className="text-red-800 dark:text-red-300">
+                            <AlertDescription className="text-xs font-medium text-red-800">
                                 {error}
                             </AlertDescription>
                         </Alert>
-                    )}
+                    ) : null}
 
-                    {/* Email Display (read-only) */}
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium">Email</label>
-                        <div className="flex items-center gap-2 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-900">
-                            <Mail className="w-4 h-4 text-gray-500" />
-                            <span className="text-sm text-gray-700 dark:text-gray-300">
-                                {email}
-                            </span>
+                    <div className="space-y-1.5">
+                        <label className="text-xs font-semibold uppercase tracking-wider text-slate-700">Email Terverifikasi</label>
+                        <div className="flex h-11 items-center gap-3 rounded-xl border border-slate-200/80 bg-slate-50/70 px-3.5">
+                            <Mail className="h-4 w-4 shrink-0 text-slate-400" />
+                            <span className="truncate text-sm font-semibold text-slate-700">{email}</span>
                         </div>
                     </div>
 
-                    {/* Password Input */}
-                    <div className="space-y-2">
-                        <label htmlFor="password" className="text-sm font-medium">
-                            Password
-                        </label>
-                        <div className="relative">
+                    <div className="grid gap-4 md:grid-cols-2">
+                        <div className="space-y-1.5 md:col-span-2">
+                            <label className="text-xs font-semibold uppercase tracking-wider text-slate-700">Nama Lengkap</label>
+                            <div className="relative">
+                                <User className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                                <Input
+                                    value={displayName}
+                                    onChange={(event) => setDisplayName(event.target.value)}
+                                    disabled={loading}
+                                    placeholder="Nama sesuai data kampus"
+                                    className="h-11 rounded-xl border-slate-200 bg-white/70 pl-10"
+                                    maxLength={100}
+                                />
+                            </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-semibold uppercase tracking-wider text-slate-700">NIM</label>
+                            <div className="relative">
+                                <Hash className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                                <Input
+                                    value={nim}
+                                    onChange={(event) => setNim(onlyDigits(event.target.value).slice(0, 30))}
+                                    disabled={loading}
+                                    placeholder="Contoh: 2241720001"
+                                    inputMode="numeric"
+                                    className="h-11 rounded-xl border-slate-200 bg-white/70 pl-10"
+                                />
+                            </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-semibold uppercase tracking-wider text-slate-700">Program Studi</label>
+                            <div className="relative">
+                                <GraduationCap className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                                <select
+                                    value={prodiId}
+                                    onChange={(event) => setProdiId(event.target.value)}
+                                    disabled={loading || loadingOptions}
+                                    className="h-11 w-full rounded-xl border border-slate-200 bg-white/70 pl-10 pr-3 text-sm font-medium text-slate-700 shadow-xs outline-none transition-all focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                    {loadingOptions ? (
+                                        <option>Memuat prodi...</option>
+                                    ) : options.prodi.length === 0 ? (
+                                        <option value="">Belum ada prodi aktif</option>
+                                    ) : (
+                                        options.prodi.map((item) => (
+                                            <option key={item.id} value={item.id}>
+                                                {item.code} - {item.name}
+                                            </option>
+                                        ))
+                                    )}
+                                </select>
+                            </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-semibold uppercase tracking-wider text-slate-700">Angkatan</label>
                             <Input
-                                id="password"
-                                type={showPassword ? 'text' : 'password'}
-                                placeholder="Minimal 8 karakter"
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
+                                value={angkatan}
+                                onChange={(event) => setAngkatan(onlyDigits(event.target.value).slice(0, 4))}
                                 disabled={loading}
-                                className="pr-10"
+                                placeholder={`Contoh: ${currentYear}`}
+                                inputMode="numeric"
+                                className="h-11 rounded-xl border-slate-200 bg-white/70"
                             />
-                            <button
-                                type="button"
-                                onClick={() => setShowPassword(!showPassword)}
-                                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-                            >
-                                {showPassword ? (
-                                    <EyeOff className="w-4 h-4" />
-                                ) : (
-                                    <Eye className="w-4 h-4" />
-                                )}
-                            </button>
                         </div>
-                        <p className="text-xs text-gray-500">
-                            Minimal 8 karakter dengan kombinasi huruf, angka, dan simbol
-                        </p>
-                    </div>
 
-                    {/* Confirm Password Input */}
-                    <div className="space-y-2">
-                        <label htmlFor="confirmPassword" className="text-sm font-medium">
-                            Konfirmasi Password
-                        </label>
-                        <div className="relative">
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-semibold uppercase tracking-wider text-slate-700">Kelas</label>
                             <Input
-                                id="confirmPassword"
-                                type={showConfirmPassword ? 'text' : 'password'}
-                                placeholder="Ulangi password"
-                                value={confirmPassword}
-                                onChange={(e) => setConfirmPassword(e.target.value)}
+                                value={kelas}
+                                onChange={(event) => setKelas(event.target.value.slice(0, 20))}
                                 disabled={loading}
-                                className="pr-10"
+                                placeholder="Contoh: TI-4A"
+                                className="h-11 rounded-xl border-slate-200 bg-white/70"
                             />
-                            <button
-                                type="button"
-                                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-                            >
-                                {showConfirmPassword ? (
-                                    <EyeOff className="w-4 h-4" />
-                                ) : (
-                                    <Eye className="w-4 h-4" />
-                                )}
-                            </button>
                         </div>
+
+                        <PasswordField
+                            id="password"
+                            label="Kata Sandi Baru"
+                            value={password}
+                            visible={showPassword}
+                            disabled={loading}
+                            onChange={setPassword}
+                            onToggle={() => setShowPassword((current) => !current)}
+                        />
+
+                        <PasswordField
+                            id="confirmPassword"
+                            label="Ulangi Kata Sandi"
+                            value={confirmPassword}
+                            visible={showConfirmPassword}
+                            disabled={loading}
+                            onChange={setConfirmPassword}
+                            onToggle={() => setShowConfirmPassword((current) => !current)}
+                        />
                     </div>
 
-                    {/* Submit Button */}
+                    <p className="text-[10px] font-medium leading-normal text-slate-400">
+                        Password minimal 8 karakter dan harus mengandung huruf besar, huruf kecil, dan angka.
+                    </p>
+
                     <Button
                         type="submit"
-                        disabled={loading || !password || !confirmPassword}
-                        className="w-full"
-                        size="lg"
+                        disabled={loading || loadingOptions || !password || !confirmPassword || !displayName || !nim || !prodiId}
+                        className="mt-2 h-11 w-full rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 font-semibold text-white shadow-lg shadow-indigo-600/20 transition-all duration-300 hover:from-indigo-500 hover:to-violet-500 disabled:opacity-50"
                     >
-                        {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        {loading ? 'Mendaftar...' : 'Selesaikan Registrasi'}
+                        {loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        {loading ? 'Menyimpan Akun...' : 'Selesaikan Registrasi Mahasiswa'}
                     </Button>
 
-                    {/* Login Link */}
-                    <p className="text-center text-sm text-gray-600 dark:text-gray-400">
-                        Sudah punya akun?{' '}
-                        <Link
-                            href="/login"
-                            className="font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400"
-                        >
+                    <p className="mt-4 text-center text-sm text-slate-500">
+                        Sudah memiliki akun?{' '}
+                        <Link href="/login" className="font-bold text-indigo-600 transition-colors hover:text-indigo-500">
                             Masuk di sini
                         </Link>
                     </p>
                 </form>
             </CardContent>
         </Card>
+    );
+}
+
+function PasswordField({
+    id,
+    label,
+    value,
+    visible,
+    disabled,
+    onChange,
+    onToggle,
+}: {
+    id: string;
+    label: string;
+    value: string;
+    visible: boolean;
+    disabled: boolean;
+    onChange: (value: string) => void;
+    onToggle: () => void;
+}) {
+    return (
+        <div className="space-y-1.5">
+            <label htmlFor={id} className="text-xs font-semibold uppercase tracking-wider text-slate-700">
+                {label}
+            </label>
+            <div className="relative">
+                <Lock className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <Input
+                    id={id}
+                    type={visible ? 'text' : 'password'}
+                    placeholder="Minimal 8 karakter"
+                    value={value}
+                    onChange={(event) => onChange(event.target.value)}
+                    disabled={disabled}
+                    className="h-11 rounded-xl border-slate-200 bg-white/70 pl-10 pr-10"
+                />
+                <button
+                    type="button"
+                    onClick={onToggle}
+                    className="absolute right-3 top-1/2 rounded-md p-1 text-slate-400 transition-colors hover:text-indigo-600"
+                    aria-label={visible ? 'Sembunyikan password' : 'Tampilkan password'}
+                >
+                    {visible ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+            </div>
+        </div>
     );
 }

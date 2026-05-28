@@ -95,14 +95,14 @@ export class IdentityController {
 
   @Get('pending')
   @UseGuards(RolesGuard)
-  @Roles('VERIFIER', 'ADMIN')
-  async listPendingIdentities() {
-    return this.identityService.listPendingIdentities();
+  @Roles('SUPERADMIN', 'ADMIN_PRODI')
+  async listPendingIdentities(@Req() req: RequestWithUser) {
+    return this.identityService.listPendingIdentities(req.user.userId);
   }
 
   @Patch(':userId/review')
   @UseGuards(RolesGuard)
-  @Roles('VERIFIER', 'ADMIN')
+  @Roles('SUPERADMIN', 'ADMIN_PRODI')
   async reviewIdentity(
     @Req() req: RequestWithUser,
     @Param('userId') userId: string,
@@ -113,9 +113,16 @@ export class IdentityController {
 
   @Get(':userId/ktp')
   @UseGuards(RolesGuard)
-  @Roles('VERIFIER', 'ADMIN')
-  async getKtpByUserId(@Param('userId') userId: string, @Res() res: Response) {
-    const path = await this.identityService.resolveKtpPath(userId);
+  @Roles('SUPERADMIN', 'ADMIN_PRODI')
+  async getKtpByUserId(
+    @Req() req: RequestWithUser,
+    @Param('userId') userId: string,
+    @Res() res: Response,
+  ) {
+    const path = await this.identityService.resolveKtpPathForReviewer(
+      req.user.userId,
+      userId,
+    );
     return res.sendFile(path);
   }
 }

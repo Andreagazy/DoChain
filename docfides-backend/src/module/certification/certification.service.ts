@@ -20,15 +20,19 @@ import {
 } from 'crypto';
 import { PDFDocument } from 'pdf-lib';
 import * as forge from 'node-forge';
+import * as QRCode from 'qrcode';
 import { pdflibAddPlaceholder } from '@signpdf/placeholder-pdf-lib';
 import { plainAddPlaceholder } from '@signpdf/placeholder-plain';
 import signpdf from '@signpdf/signpdf';
 import { P12Signer } from '@signpdf/signer-p12';
-import { SignaturePreference } from '../../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SignDocumentDto, SignatureMode } from './dto/sign-document.dto';
 import { RequestSignersDto } from './dto/request-signers.dto';
+import { DeclineDocumentDto } from './dto/decline-document.dto';
 import { UpdateSignaturePreferenceDto } from './dto/update-signature-preference.dto';
+import { FinalizeQrDto } from './dto/finalize-qr.dto';
+import { IpfsService } from './ipfs.service';
+import { BlockchainService } from './blockchain.service';
 
 type SignerPlaceholderConfig = {
   visiblePage: number | null;
@@ -51,6 +55,11 @@ type SignDocumentQueryResult = {
   originalFileHash: string | null;
   finalFileName: string | null;
   finalFileHash: string | null;
+  qrCodePage: number | null;
+  qrCodeX: number | null;
+  qrCodeY: number | null;
+  qrCodeWidth: number | null;
+  qrCodeHeight: number | null;
   _count: {
     requiredSigners: number;
     signatures: number;
@@ -58,9 +67,22 @@ type SignDocumentQueryResult = {
   requiredSigners: SignerMembershipForSign[];
 };
 
+const SIGNER_ROLE_RANK: Record<string, number> = {
+  MAHASISWA: 10,
+  PEGAWAI: 20,
+  ADMIN_PRODI: 30,
+  PRODI: 40,
+  JURUSAN: 50,
+  SUPERADMIN: 60,
+};
+
 @Injectable()
 export class CertificationService {
-  constructor(private prisma: PrismaService) { }
+  constructor(
+    private prisma: PrismaService,
+    private ipfsService: IpfsService,
+    private blockchainService: BlockchainService,
+  ) {}
 
   private async buildUniqueOriginalFileName(
     userId: string,
@@ -164,6 +186,8 @@ export class CertificationService {
         status: true,
         originalFileName: true,
         finalFileName: true,
+        finalFileIpfsHash: true,
+        qrCodePage: true,
         updatedAt: true,
         _count: {
           select: {
@@ -179,11 +203,23 @@ export class CertificationService {
         id: item.id,
         status: item.status,
         originalFileName: item.originalFileName,
-        finalFileName: item.finalFileName,
+        finalFileName: item._count.signatures > 0 ? item.finalFileName : null,
+        finalFileIpfsHash:
+          item._count.signatures > 0 ? item.finalFileIpfsHash : null,
+        finalFileIpfsGatewayUrl:
+          item._count.signatures > 0
+            ? this.ipfsService.getGatewayUrl(item.finalFileIpfsHash)
+            : null,
+        hasVerificationQr: item.qrCodePage != null,
         requiredSignerCount: item._count.requiredSigners,
+        signatureCount: item._count.signatures,
         updatedAt: item.updatedAt,
       })),
     };
+  }
+
+  async getIpfsStatus() {
+    return this.ipfsService.getStatus();
   }
 
   async listAssignedDocuments(userId: string) {
@@ -317,6 +353,16 @@ export class CertificationService {
         originalFileHash: true,
         finalFileName: true,
         finalFileHash: true,
+        qrCodePage: true,
+        qrCodeX: true,
+        qrCodeY: true,
+        qrCodeWidth: true,
+        qrCodeHeight: true,
+        _count: {
+          select: {
+            signatures: true,
+          },
+        },
         requiredSigners: {
           where: { userId },
           select: { id: true },
@@ -339,8 +385,9 @@ export class CertificationService {
 
     if (
       variant === 'signed' &&
-      !document.finalFileName &&
-      !document.finalFileHash
+      (!document.finalFileName ||
+        !document.finalFileHash ||
+        document._count.signatures === 0)
     ) {
       throw new BadRequestException(
         'Dokumen belum memiliki versi bertanda tangan',
@@ -350,24 +397,24 @@ export class CertificationService {
     const path =
       variant === 'original'
         ? this.resolveDocumentPath(documentStorageOwnerId, {
-          finalFileName: null,
-          originalFileName: document.originalFileName,
-          finalFileHash: null,
-          originalFileHash: document.originalFileHash,
-        })
+            finalFileName: null,
+            originalFileName: document.originalFileName,
+            finalFileHash: null,
+            originalFileHash: document.originalFileHash,
+          })
         : variant === 'signed'
           ? this.resolveDocumentPath(documentStorageOwnerId, {
-            finalFileName: document.finalFileName,
-            originalFileName: null,
-            finalFileHash: document.finalFileHash,
-            originalFileHash: null,
-          })
+              finalFileName: document.finalFileName,
+              originalFileName: null,
+              finalFileHash: document.finalFileHash,
+              originalFileHash: null,
+            })
           : this.resolveDocumentPath(documentStorageOwnerId, {
-            finalFileName: document.finalFileName,
-            originalFileName: document.originalFileName,
-            finalFileHash: document.finalFileHash,
-            originalFileHash: document.originalFileHash,
-          });
+              finalFileName: document.finalFileName,
+              originalFileName: document.originalFileName,
+              finalFileHash: document.finalFileHash,
+              originalFileHash: document.originalFileHash,
+            });
 
     const fileName =
       variant === 'original'
@@ -400,8 +447,39 @@ export class CertificationService {
         id: true,
         email: true,
         displayName: true,
+        role: true,
         preferredSignatureMode: true,
+        studentProfile: {
+          select: {
+            nim: true,
+            prodi: { select: { code: true, name: true } },
+          },
+        },
+        employeeProfile: {
+          select: {
+            nip: true,
+            nidn: true,
+            positionTitle: true,
+            homeUnit: { select: { code: true, name: true, type: true } },
+          },
+        },
+        structuralAssignments: {
+          where: { isActive: true, endsAt: null },
+          select: {
+            position: true,
+            academicUnit: { select: { code: true, name: true, type: true } },
+          },
+        },
       },
+    });
+
+    users.sort((a, b) => {
+      const rankA = SIGNER_ROLE_RANK[a.role] ?? 999;
+      const rankB = SIGNER_ROLE_RANK[b.role] ?? 999;
+      return (
+        rankA - rankB ||
+        (a.displayName ?? a.email).localeCompare(b.displayName ?? b.email)
+      );
     });
 
     return {
@@ -409,6 +487,9 @@ export class CertificationService {
         id: user.id,
         email: user.email,
         displayName: user.displayName,
+        role: user.role,
+        signerLevel: SIGNER_ROLE_RANK[user.role] ?? 999,
+        academicProfile: this.buildSignerAcademicProfile(user),
         preferredSignatureMode: user.preferredSignatureMode.toLowerCase(),
       })),
     };
@@ -444,9 +525,9 @@ export class CertificationService {
     dto: UpdateSignaturePreferenceDto,
   ) {
     const preferredSignatureMode =
-      dto.mode === 'visible'
-        ? SignaturePreference.VISIBLE
-        : SignaturePreference.INVISIBLE;
+      dto.mode === SignatureMode.VISIBLE
+        ? 'VISIBLE'
+        : 'INVISIBLE';
 
     const updated = await this.prisma.user.update({
       where: { id: userId },
@@ -481,6 +562,7 @@ export class CertificationService {
         status: true,
         originalFileName: true,
         originalFileHash: true,
+        qrCodePage: true,
       },
     });
 
@@ -497,6 +579,12 @@ export class CertificationService {
     if (document.status === 'REVOKED') {
       throw new BadRequestException(
         'Dokumen REVOKED tidak dapat meminta signer',
+      );
+    }
+
+    if (document.qrCodePage != null) {
+      throw new BadRequestException(
+        'QR verifikasi sudah ditempatkan. Ubah signer/placeholder sebelum menyimpan QR.',
       );
     }
 
@@ -546,7 +634,29 @@ export class CertificationService {
         id: true,
         email: true,
         displayName: true,
+        role: true,
         preferredSignatureMode: true,
+        studentProfile: {
+          select: {
+            nim: true,
+            prodi: { select: { code: true, name: true } },
+          },
+        },
+        employeeProfile: {
+          select: {
+            nip: true,
+            nidn: true,
+            positionTitle: true,
+            homeUnit: { select: { code: true, name: true, type: true } },
+          },
+        },
+        structuralAssignments: {
+          where: { isActive: true, endsAt: null },
+          select: {
+            position: true,
+            academicUnit: { select: { code: true, name: true, type: true } },
+          },
+        },
       },
     });
 
@@ -557,6 +667,22 @@ export class CertificationService {
         `User signer tidak ditemukan: ${missing.join(', ')}`,
       );
     }
+
+    const userById = new Map(users.map((user) => [user.id, user]));
+    const requestedIndexById = new Map(
+      signerIds.map((signerId, index) => [signerId, index]),
+    );
+    signerIds.sort((a, b) => {
+      const userA = userById.get(a);
+      const userB = userById.get(b);
+      const rankA = SIGNER_ROLE_RANK[userA?.role ?? ''] ?? 999;
+      const rankB = SIGNER_ROLE_RANK[userB?.role ?? ''] ?? 999;
+
+      return (
+        rankA - rankB ||
+        (requestedIndexById.get(a) ?? 999) - (requestedIndexById.get(b) ?? 999)
+      );
+    });
 
     const existingSigners = await this.prisma.documentSigner.findMany({
       where: {
@@ -710,19 +836,22 @@ export class CertificationService {
       const shouldMoveToPending = document.status === 'DRAFT';
       const updatedDocument = shouldMoveToPending
         ? await tx.document.update({
-          where: { id: documentId },
-          data: { status: 'PENDING_SIGNATURES' },
-          select: {
-            id: true,
-            status: true,
-            updatedAt: true,
-          },
-        })
-        : {
-          id: document.id,
-          status: document.status,
-          updatedAt: new Date(),
-        };
+            where: { id: documentId },
+            data: { status: 'PENDING_SIGNATURES' },
+            select: {
+              id: true,
+              status: true,
+              updatedAt: true,
+            },
+          })
+        : await tx.document.findUniqueOrThrow({
+            where: { id: documentId },
+            select: {
+              id: true,
+              status: true,
+              updatedAt: true,
+            },
+          });
 
       return {
         processed,
@@ -804,6 +933,9 @@ export class CertificationService {
           userId: item.userId,
           email: user?.email ?? null,
           displayName: user?.displayName ?? null,
+          role: user?.role ?? null,
+          signerLevel: user?.role ? (SIGNER_ROLE_RANK[user.role] ?? 999) : null,
+          academicProfile: user ? this.buildSignerAcademicProfile(user) : null,
           preferredSignatureMode:
             user?.preferredSignatureMode.toLowerCase() ?? 'invisible',
           status: item.status,
@@ -931,14 +1063,14 @@ export class CertificationService {
     const updated =
       document.status === 'DRAFT'
         ? await this.prisma.document.update({
-          where: { id: document.id },
-          data: { status: 'PENDING_SIGNATURES' },
-          select: {
-            id: true,
-            status: true,
-            updatedAt: true,
-          },
-        })
+            where: { id: document.id },
+            data: { status: 'PENDING_SIGNATURES' },
+            select: {
+              id: true,
+              status: true,
+              updatedAt: true,
+            },
+          })
         : document;
 
     return {
@@ -962,6 +1094,11 @@ export class CertificationService {
         originalFileHash: true,
         finalFileName: true,
         finalFileHash: true,
+        qrCodePage: true,
+        qrCodeX: true,
+        qrCodeY: true,
+        qrCodeWidth: true,
+        qrCodeHeight: true,
         _count: {
           select: {
             requiredSigners: true,
@@ -996,6 +1133,12 @@ export class CertificationService {
       );
     }
 
+    if (document.qrCodePage == null) {
+      throw new BadRequestException(
+        'Tentukan lokasi QR verifikasi terlebih dahulu sebelum dokumen ditandatangani',
+      );
+    }
+
     const requiredSignersCount = Number(document._count.requiredSigners ?? 0);
     const signerMembership =
       (document.requiredSigners[0] as SignerMembershipForSign | undefined) ??
@@ -1016,6 +1159,10 @@ export class CertificationService {
 
     if (signerMembership?.status === 'SIGNED') {
       throw new BadRequestException('Anda sudah menandatangani dokumen ini');
+    }
+
+    if (signerMembership?.status === 'DECLINED') {
+      throw new BadRequestException('Anda sudah menolak dokumen ini');
     }
 
     if (requiredSignersCount > 0) {
@@ -1049,6 +1196,40 @@ export class CertificationService {
         originalFileHash: document.originalFileHash,
       },
     );
+
+    const existingSigner = await this.prisma.documentSigner.findUnique({
+      where: {
+        documentId_userId: {
+          documentId,
+          userId,
+        },
+      },
+      select: {
+        id: true,
+        status: true,
+        order: true,
+      },
+    });
+
+    if (existingSigner?.status === 'SIGNED') {
+      throw new BadRequestException('Anda sudah menandatangani dokumen ini');
+    }
+
+    const [totalRequiredSignersBeforeSign, pendingSignersBeforeSign] =
+      await Promise.all([
+        this.prisma.documentSigner.count({
+          where: { documentId },
+        }),
+        this.prisma.documentSigner.count({
+          where: {
+            documentId,
+            status: { not: 'SIGNED' },
+          },
+        }),
+      ]);
+
+    const pendingSignersAfterSign =
+      pendingSignersBeforeSign - (existingSigner ? 1 : 0);
 
     const sourcePdfBuffer = readFileSync(sourceDocumentPath);
     const { p12Data, passphrase, certificateId } =
@@ -1090,24 +1271,18 @@ export class CertificationService {
       signedPdfBuffer,
     );
     const signedHash = this.sha256Hex(signedPdfBuffer);
-
-    const existingSigner = await this.prisma.documentSigner.findUnique({
-      where: {
-        documentId_userId: {
-          documentId,
-          userId,
-        },
-      },
-      select: {
-        id: true,
-        status: true,
-        order: true,
-      },
-    });
-
-    if (existingSigner?.status === 'SIGNED') {
-      throw new BadRequestException('Anda sudah menandatangani dokumen ini');
-    }
+    const shouldFinalizeDocument =
+      totalRequiredSignersBeforeSign === 0 || pendingSignersAfterSign === 0;
+    const ipfsResult = shouldFinalizeDocument
+      ? await this.ipfsService.addPdf(signedPdfBuffer, signedOutput.fileName)
+      : null;
+    const blockchainResult = shouldFinalizeDocument
+      ? await this.blockchainService.recordFinalDocumentHash(
+          document.id,
+          signedHash,
+          ipfsResult?.cid ?? null,
+        )
+      : null;
 
     const maxOrder = await this.prisma.signature.aggregate({
       where: { documentId },
@@ -1122,7 +1297,9 @@ export class CertificationService {
           signerId: userId,
           certificateId,
           signedFileHash: signedHash,
+          signedFileIpfsHash: ipfsResult?.cid ?? null,
           documentHash: signedHash,
+          blockchainTxHash: blockchainResult?.txHash ?? null,
           order: nextOrder,
         },
         select: {
@@ -1155,18 +1332,8 @@ export class CertificationService {
         });
       }
 
-      const totalRequiredSigners = await tx.documentSigner.count({
-        where: { documentId },
-      });
-      const pendingSigners = await tx.documentSigner.count({
-        where: {
-          documentId,
-          status: { not: 'SIGNED' },
-        },
-      });
-
       const nextStatus =
-        totalRequiredSigners === 0 || pendingSigners === 0
+        totalRequiredSignersBeforeSign === 0 || pendingSignersAfterSign === 0
           ? 'FULLY_SIGNED'
           : 'PARTIALLY_SIGNED';
 
@@ -1177,12 +1344,14 @@ export class CertificationService {
           finalFileName: signedOutput.fileName,
           finalFileHash: signedHash,
           finalFileSize: signedOutput.sizeBytes,
+          finalFileIpfsHash: ipfsResult?.cid ?? null,
         },
         select: {
           id: true,
           status: true,
           finalFileName: true,
           finalFileHash: true,
+          finalFileIpfsHash: true,
           finalFileSize: true,
           updatedAt: true,
         },
@@ -1201,9 +1370,242 @@ export class CertificationService {
         fileName: signedOutput.fileName,
         storagePath: signedOutput.absolutePath,
         hash: signedHash,
+        ipfsHash: ipfsResult?.cid ?? null,
+        ipfsGatewayUrl: ipfsResult?.gatewayUrl ?? null,
+        blockchainTxHash: blockchainResult?.txHash ?? null,
         sizeBytes: signedOutput.sizeBytes,
       },
       ...transactionResult,
+    };
+  }
+
+  async finalizeQr(userId: string, documentId: string, dto: FinalizeQrDto) {
+    await this.ensureIdentityApproved(userId);
+
+    const document = await this.prisma.document.findUnique({
+      where: { id: documentId },
+      select: {
+        id: true,
+        userId: true,
+        status: true,
+        originalFileName: true,
+        originalFileHash: true,
+        finalFileName: true,
+        finalFileHash: true,
+        qrCodePage: true,
+        _count: {
+          select: {
+            signatures: true,
+          },
+        },
+      },
+    });
+
+    if (!document) {
+      throw new NotFoundException('Dokumen tidak ditemukan');
+    }
+
+    if (document.userId !== userId) {
+      throw new BadRequestException(
+        'Hanya pemilik dokumen yang dapat menentukan QR verifikasi',
+      );
+    }
+
+    if (document.status === 'REVOKED') {
+      throw new BadRequestException(
+        'Dokumen REVOKED tidak dapat diberi QR verifikasi',
+      );
+    }
+
+    if (document._count.signatures > 0) {
+      throw new BadRequestException(
+        'QR verifikasi harus ditempatkan sebelum tanda tangan pertama agar signature tetap valid',
+      );
+    }
+
+    if (!['DRAFT', 'PENDING_SIGNATURES'].includes(document.status)) {
+      throw new BadRequestException(
+        'QR verifikasi hanya dapat ditempatkan sebelum proses tanda tangan dimulai',
+      );
+    }
+
+    if (document.qrCodePage != null) {
+      throw new BadRequestException(
+        'Dokumen sudah memiliki QR verifikasi',
+      );
+    }
+
+    const sourceDocumentPath = this.resolveDocumentPath(document.userId, {
+      finalFileName: document.finalFileName,
+      originalFileName: document.originalFileName,
+      finalFileHash: document.finalFileHash,
+      originalFileHash: document.originalFileHash,
+    });
+
+    const qrWidth = dto.width ?? 96;
+    const qrHeight = dto.height ?? qrWidth;
+    const finalizedBuffer = Buffer.from(
+      await this.renderVerificationQrCode(readFileSync(sourceDocumentPath), document.id, {
+        qrCodePage: dto.page,
+        qrCodeX: dto.x,
+        qrCodeY: dto.y,
+        qrCodeWidth: qrWidth,
+        qrCodeHeight: qrHeight,
+      }),
+    );
+    const finalizedOutput = this.saveSignedDocument(
+      document.userId,
+      document.id,
+      finalizedBuffer,
+    );
+    const finalizedHash = this.sha256Hex(finalizedBuffer);
+
+    const updatedDocument = await this.prisma.document.update({
+      where: { id: document.id },
+      data: {
+        finalFileName: finalizedOutput.fileName,
+        finalFileHash: finalizedHash,
+        finalFileSize: finalizedOutput.sizeBytes,
+        finalFileIpfsHash: null,
+        qrCodePage: dto.page,
+        qrCodeX: dto.x,
+        qrCodeY: dto.y,
+        qrCodeWidth: qrWidth,
+        qrCodeHeight: qrHeight,
+      },
+      select: {
+        id: true,
+        status: true,
+        finalFileName: true,
+        finalFileHash: true,
+        finalFileIpfsHash: true,
+        finalFileSize: true,
+        updatedAt: true,
+      },
+    });
+
+    return {
+      message:
+        'QR verifikasi berhasil ditempatkan. Dokumen siap ditandatangani.',
+      document: updatedDocument,
+      file: {
+        fileName: finalizedOutput.fileName,
+        storagePath: finalizedOutput.absolutePath,
+        hash: finalizedHash,
+        ipfsHash: null,
+        ipfsGatewayUrl: null,
+        blockchainTxHash: null,
+        sizeBytes: finalizedOutput.sizeBytes,
+      },
+    };
+  }
+
+  async declineDocument(
+    userId: string,
+    documentId: string,
+    dto: DeclineDocumentDto,
+  ) {
+    await this.ensureIdentityApproved(userId);
+
+    const document = await this.prisma.document.findUnique({
+      where: { id: documentId },
+      select: {
+        id: true,
+        status: true,
+        requiredSigners: {
+          where: { userId },
+          select: {
+            id: true,
+            userId: true,
+            status: true,
+            order: true,
+          },
+        },
+      },
+    });
+
+    if (!document) {
+      throw new NotFoundException('Dokumen tidak ditemukan');
+    }
+
+    if (document.status === 'REVOKED') {
+      throw new BadRequestException('Dokumen sudah dihentikan/revoked');
+    }
+
+    const signerMembership = document.requiredSigners[0];
+
+    if (!signerMembership) {
+      throw new BadRequestException(
+        'Anda tidak termasuk signer yang diminta untuk dokumen ini',
+      );
+    }
+
+    if (signerMembership.status === 'SIGNED') {
+      throw new BadRequestException(
+        'Dokumen yang sudah ditandatangani tidak dapat ditolak',
+      );
+    }
+
+    if (signerMembership.status === 'DECLINED') {
+      throw new BadRequestException('Anda sudah menolak dokumen ini');
+    }
+
+    const nextPendingSigner = await this.prisma.documentSigner.findFirst({
+      where: {
+        documentId,
+        status: 'PENDING',
+      },
+      orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+      select: {
+        userId: true,
+        order: true,
+      },
+    });
+
+    if (nextPendingSigner && nextPendingSigner.userId !== userId) {
+      throw new BadRequestException(
+        `Dokumen harus diproses sesuai urutan. Menunggu signer urutan ${nextPendingSigner.order ?? '-'} terlebih dahulu.`,
+      );
+    }
+
+    const reason = dto.reason.trim();
+
+    const result = await this.prisma.$transaction(async (tx) => {
+      const signer = await tx.documentSigner.update({
+        where: { id: signerMembership.id },
+        data: {
+          status: 'DECLINED',
+          declinedAt: new Date(),
+          declineReason: reason,
+        },
+        select: {
+          userId: true,
+          status: true,
+          declinedAt: true,
+          declineReason: true,
+          order: true,
+        },
+      });
+
+      const updatedDocument = await tx.document.update({
+        where: { id: documentId },
+        data: { status: 'REVOKED' },
+        select: {
+          id: true,
+          status: true,
+          updatedAt: true,
+        },
+      });
+
+      return {
+        signer,
+        document: updatedDocument,
+      };
+    });
+
+    return {
+      message: 'Dokumen ditolak dan flow tanda tangan dihentikan',
+      ...result,
     };
   }
 
@@ -1233,6 +1635,108 @@ export class CertificationService {
       visibleWidth: null,
       visibleHeight: null,
     };
+  }
+
+  private buildSignerAcademicProfile(user: {
+    role: string;
+    studentProfile?: {
+      nim: string;
+      prodi: { code: string; name: string };
+    } | null;
+    employeeProfile?: {
+      nip: string | null;
+      nidn: string | null;
+      positionTitle: string | null;
+      homeUnit: { code: string; name: string; type: string };
+    } | null;
+    structuralAssignments?: Array<{
+      position: string;
+      academicUnit: { code: string; name: string; type: string };
+    }>;
+  }) {
+    if (user.studentProfile) {
+      return {
+        type: 'STUDENT',
+        identifier: user.studentProfile.nim,
+        unitCode: user.studentProfile.prodi.code,
+        unitName: user.studentProfile.prodi.name,
+        unitType: 'PRODI',
+        label: `${user.studentProfile.nim} - ${user.studentProfile.prodi.name}`,
+        positionTitle: null,
+        structuralPositions: [],
+      };
+    }
+
+    if (user.employeeProfile) {
+      const activePosition = user.structuralAssignments?.[0]?.position;
+      return {
+        type: 'EMPLOYEE',
+        identifier: user.employeeProfile.nip ?? user.employeeProfile.nidn,
+        unitCode: user.employeeProfile.homeUnit.code,
+        unitName: user.employeeProfile.homeUnit.name,
+        unitType: user.employeeProfile.homeUnit.type,
+        label: [
+          user.employeeProfile.positionTitle ?? activePosition ?? user.role,
+          user.employeeProfile.homeUnit.name,
+        ].join(' - '),
+        positionTitle: user.employeeProfile.positionTitle,
+        structuralPositions: user.structuralAssignments ?? [],
+      };
+    }
+
+    return null;
+  }
+
+  private async renderVerificationQrCode(
+    pdfBuffer: Buffer,
+    documentId: string,
+    placement: Pick<
+      SignDocumentQueryResult,
+      'qrCodePage' | 'qrCodeX' | 'qrCodeY' | 'qrCodeWidth' | 'qrCodeHeight'
+    >,
+  ): Promise<Uint8Array> {
+    if (
+      placement.qrCodePage == null ||
+      placement.qrCodeX == null ||
+      placement.qrCodeY == null
+    ) {
+      return pdfBuffer;
+    }
+
+    const pdfDoc = await PDFDocument.load(pdfBuffer);
+    const pages = pdfDoc.getPages();
+    const pageIndex = Math.max(
+      0,
+      Math.min(placement.qrCodePage - 1, pages.length - 1),
+    );
+    const page = pages[pageIndex];
+    const width = placement.qrCodeWidth ?? 96;
+    const height = placement.qrCodeHeight ?? width;
+    const verificationBaseUrl =
+      process.env.DOCUMENT_VERIFICATION_URL ??
+      process.env.FRONTEND_URL ??
+      'http://localhost:3000/verify';
+    const verificationUrl = `${verificationBaseUrl.replace(
+      /\/$/,
+      '',
+    )}?documentId=${encodeURIComponent(documentId)}`;
+    const qrDataUrl = await QRCode.toDataURL(verificationUrl, {
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      width: Math.max(128, Math.ceil(Math.max(width, height) * 2)),
+    });
+    const qrPng = await pdfDoc.embedPng(
+      Buffer.from(qrDataUrl.split(',')[1], 'base64'),
+    );
+
+    page.drawImage(qrPng, {
+      x: placement.qrCodeX,
+      y: placement.qrCodeY,
+      width,
+      height,
+    });
+
+    return pdfDoc.save();
   }
 
   private async ensureIdentityApproved(userId: string) {
@@ -1508,7 +2012,7 @@ export class CertificationService {
           width,
           height,
         });
-      } catch (err) {
+      } catch {
         throw new BadRequestException(
           `Gagal membaca signature image untuk signer ${signer.userId}`,
         );
@@ -1573,7 +2077,7 @@ export class CertificationService {
         pdfPage: targetPage,
         reason: dto.reason ?? 'DocFides digital signature',
         name: `User ${userId}`,
-        contactInfo: 'support@docfides.local',
+        contactInfo: 'support@dochain.local',
         location: 'DocFides',
         signingTime: new Date(),
         widgetRect: [x, y, x + width, y + height],
@@ -1583,7 +2087,7 @@ export class CertificationService {
         pdfDoc,
         reason: dto.reason ?? 'DocFides digital signature',
         name: `User ${userId}`,
-        contactInfo: 'support@docfides.local',
+        contactInfo: 'support@dochain.local',
         location: 'DocFides',
         signingTime: new Date(),
       });
@@ -1609,7 +2113,7 @@ export class CertificationService {
       pdfBuffer: sourcePdf,
       reason: dto.reason ?? 'DocFides digital signature',
       name: `User ${userId}`,
-      contactInfo: 'support@docfides.local',
+      contactInfo: 'support@dochain.local',
       location: 'DocFides',
       signingTime: new Date(),
       ...(dto.mode === SignatureMode.VISIBLE
@@ -1671,6 +2175,8 @@ export class CertificationService {
     ).replace(/,/g, ' ');
     const organizationName = 'DoChain';
     const subjectDn = `CN=${commonName},O=${organizationName},C=ID`;
+    const caIdentity = this.loadCertificateAuthority();
+    const issuerDn = this.formatForgeDn(caIdentity.certificate.subject.attributes);
 
     const existing = await this.prisma.certificate.findFirst({
       where: {
@@ -1690,7 +2196,7 @@ export class CertificationService {
     });
 
     const requiresRotation =
-      !!existing && this.shouldRotateCertificate(existing, subjectDn);
+      !!existing && this.shouldRotateCertificate(existing, subjectDn, issuerDn);
 
     if (existing && existing.notAfter > new Date() && !requiresRotation) {
       return {
@@ -1726,13 +2232,38 @@ export class CertificationService {
     ];
 
     cert.setSubject(attrs);
-    cert.setIssuer(attrs);
-    cert.sign(keys.privateKey, forge.md.sha256.create());
+    cert.setIssuer(caIdentity.certificate.subject.attributes);
+    cert.setExtensions([
+      {
+        name: 'basicConstraints',
+        cA: false,
+      },
+      {
+        name: 'keyUsage',
+        digitalSignature: true,
+        nonRepudiation: true,
+      },
+      {
+        name: 'extKeyUsage',
+        clientAuth: true,
+        emailProtection: true,
+      },
+      {
+        name: 'subjectKeyIdentifier',
+      },
+      {
+        name: 'authorityKeyIdentifier',
+        keyIdentifier: true,
+        authorityCertIssuer: true,
+        serialNumber: caIdentity.certificate.serialNumber,
+      },
+    ]);
+    cert.sign(caIdentity.privateKey, forge.md.sha256.create());
 
     const passphrase = randomBytes(16).toString('hex');
     const p12Asn1 = forge.pkcs12.toPkcs12Asn1(
       keys.privateKey,
-      [cert],
+      cert,
       passphrase,
       {
         algorithm: '3des',
@@ -1755,7 +2286,7 @@ export class CertificationService {
         p12Data: p12Buffer,
         p12PasswordEnc: this.sealSecret(passphrase),
         subjectDN: subjectDn,
-        issuerDN: subjectDn,
+        issuerDN: issuerDn,
         serialNumber: certificateSerialNumber,
         notBefore: certificateNotBefore,
         notAfter: certificateNotAfter,
@@ -1778,18 +2309,77 @@ export class CertificationService {
       issuerDN: string | null;
     },
     expectedSubjectDn: string,
+    expectedIssuerDn: string,
   ) {
     const normalizeDn = (dn: string | null) =>
       (dn ?? '').toLowerCase().replace(/\s+/g, '').replace(/,+/g, ',').trim();
 
     const currentSubject = normalizeDn(existingCertificate.subjectDN);
     const currentIssuer = normalizeDn(existingCertificate.issuerDN);
-    const expected = normalizeDn(expectedSubjectDn);
+    const expectedSubject = normalizeDn(expectedSubjectDn);
+    const expectedIssuer = normalizeDn(expectedIssuerDn);
 
     return (
-      currentSubject !== expected ||
-      (currentIssuer !== '' && currentIssuer !== expected)
+      currentSubject !== expectedSubject ||
+      (currentIssuer !== '' && currentIssuer !== expectedIssuer)
     );
+  }
+
+  private loadCertificateAuthority(): {
+    certificate: forge.pki.Certificate;
+    privateKey: forge.pki.rsa.PrivateKey;
+  } {
+    const caCertPath = resolve(
+      process.cwd(),
+      process.env.DOCHAIN_CA_CERT_PATH ?? 'certs/dochain-ca.crt',
+    );
+    const caKeyPath = resolve(
+      process.cwd(),
+      process.env.DOCHAIN_CA_KEY_PATH ?? 'certs/dochain-ca.key',
+    );
+
+    if (!existsSync(caCertPath) || !existsSync(caKeyPath)) {
+      throw new BadRequestException(
+        'DoChain CA belum tersedia. Generate certs/dochain-ca.crt dan certs/dochain-ca.key terlebih dahulu.',
+      );
+    }
+
+    const certificatePem = readFileSync(caCertPath, 'utf8');
+    const privateKeyPem = readFileSync(caKeyPath, 'utf8');
+    const certificate = forge.pki.certificateFromPem(certificatePem);
+    const passphrase = process.env.DOCHAIN_CA_KEY_PASSPHRASE;
+    const privateKey = passphrase
+      ? forge.pki.decryptRsaPrivateKey(privateKeyPem, passphrase)
+      : forge.pki.privateKeyFromPem(privateKeyPem);
+
+    if (!privateKey) {
+      throw new BadRequestException('Private key DoChain CA tidak valid');
+    }
+
+    return {
+      certificate,
+      privateKey,
+    };
+  }
+
+  private formatForgeDn(attributes: forge.pki.CertificateField[]) {
+    const keyByName: Record<string, string> = {
+      commonName: 'CN',
+      organizationName: 'O',
+      organizationalUnitName: 'OU',
+      countryName: 'C',
+      stateOrProvinceName: 'ST',
+      localityName: 'L',
+      emailAddress: 'E',
+    };
+
+    return attributes
+      .map((attribute) => {
+        const key =
+          keyByName[attribute.name ?? ''] ?? attribute.shortName ?? attribute.name;
+        return `${key}=${String(attribute.value).replace(/,/g, ' ')}`;
+      })
+      .join(',');
   }
 
   private sealSecret(plainText: string): string {

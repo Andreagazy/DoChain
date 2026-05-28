@@ -1,12 +1,14 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Search } from 'lucide-react';
+import Link from 'next/link';
+import { FileText, RefreshCw, Search, UploadCloud } from 'lucide-react';
 import { AxiosError } from 'axios';
 import { AppShell } from '@/components/layout/app-shell';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { DocumentTable } from '@/components/documents/document-table';
 import { EmptyState } from '@/components/common/empty-state';
 import {
@@ -15,6 +17,8 @@ import {
     getCertificationDocumentSignedFile,
 } from '@/lib/auth-service';
 import { OwnedDocumentItem } from '@/types/auth';
+
+const DOCUMENTS_PER_PAGE = 10;
 
 function normalizeErrorMessage(err: unknown): string {
     const axiosError = err as AxiosError<{ message?: string | string[] }>;
@@ -31,6 +35,7 @@ export default function DocumentsPage() {
     const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'pending' | 'signed'>('all');
     const [sortBy, setSortBy] = useState<'name' | 'updatedAt' | 'status'>('updatedAt');
     const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+    const [currentPage, setCurrentPage] = useState(1);
 
     const loadDocuments = async () => {
         setError('');
@@ -86,6 +91,21 @@ export default function DocumentsPage() {
         return sorted;
     }, [documents, search, statusFilter, sortBy, sortDirection]);
 
+    const totalPages = Math.max(1, Math.ceil(filteredDocuments.length / DOCUMENTS_PER_PAGE));
+
+    const paginatedDocuments = useMemo(() => {
+        const startIndex = (currentPage - 1) * DOCUMENTS_PER_PAGE;
+        return filteredDocuments.slice(startIndex, startIndex + DOCUMENTS_PER_PAGE);
+    }, [currentPage, filteredDocuments]);
+
+    useEffect(() => {
+        setCurrentPage(1);
+    }, [search, statusFilter, sortBy, sortDirection]);
+
+    useEffect(() => {
+        setCurrentPage((page) => Math.min(page, totalPages));
+    }, [totalPages]);
+
     const handleSortChange = (nextSortBy: 'name' | 'updatedAt' | 'status') => {
         if (sortBy === nextSortBy) {
             setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'));
@@ -124,21 +144,37 @@ export default function DocumentsPage() {
     };
 
     return (
-        <AppShell title="Documents" subtitle="Search, filter, sort, and manage your certified documents.">
-            <div className="space-y-5">
+        <AppShell title="Dokumen" subtitle="Cari dokumen, lanjutkan sertifikasi, atau unduh file final.">
+            <div className="space-y-6">
+                <section className="flex flex-col gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                        <Badge variant="neutral">{documents.length} dokumen</Badge>
+                        <h1 className="mt-3 text-2xl font-semibold text-slate-950">Daftar dokumen</h1>
+                        <p className="mt-1 max-w-2xl text-sm leading-6 text-slate-600">
+                            Lihat status, unduh file, dan buka langkah sertifikasi berikutnya dari satu tabel.
+                        </p>
+                    </div>
+                    <Button asChild>
+                        <Link href="/documents/upload">
+                            <UploadCloud className="h-4 w-4" />
+                            Upload Dokumen
+                        </Link>
+                    </Button>
+                </section>
+
                 {error ? (
                     <Alert className="border-red-200 bg-red-50 text-red-800">
                         <AlertDescription>{error}</AlertDescription>
                     </Alert>
                 ) : null}
 
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_auto_auto]">
+                <div className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm md:grid-cols-[1fr_auto_auto]">
                     <div className="relative">
                         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                         <Input
                             aria-label="Search documents"
-                            className="pl-9"
-                            placeholder="Search by file name or document ID"
+                            className="bg-white pl-9"
+                            placeholder="Cari nama file atau ID dokumen"
                             value={search}
                             onChange={(event) => setSearch(event.target.value)}
                         />
@@ -146,37 +182,68 @@ export default function DocumentsPage() {
 
                     <select
                         aria-label="Filter by status"
-                        className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm"
+                        className="h-9 rounded-md border border-slate-300 bg-white px-3 text-sm shadow-xs outline-none focus:border-slate-400"
                         value={statusFilter}
                         onChange={(event) => setStatusFilter(event.target.value as 'all' | 'draft' | 'pending' | 'signed')}
                     >
-                        <option value="all">All Statuses</option>
+                        <option value="all">Semua Status</option>
                         <option value="draft">Draft</option>
                         <option value="pending">Pending</option>
                         <option value="signed">Signed</option>
                     </select>
 
                     <Button variant="outline" className="border-slate-300" onClick={() => void loadDocuments()}>
-                        Refresh
+                        <RefreshCw className="h-4 w-4" />
+                        Muat Ulang
                     </Button>
                 </div>
 
                 {loading ? (
-                    <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Loading documents...</div>
+                    <div className="rounded-lg border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">Memuat dokumen...</div>
                 ) : filteredDocuments.length === 0 ? (
                     <EmptyState
-                        title="No documents found"
-                        description="Upload your first document or adjust your search and filters."
+                        title="Dokumen tidak ditemukan"
+                        description="Upload dokumen pertama atau ubah pencarian dan filter."
+                        icon={<FileText className="h-5 w-5" />}
                     />
                 ) : (
-                    <DocumentTable
-                        documents={filteredDocuments}
-                        sortBy={sortBy}
-                        sortDirection={sortDirection}
-                        onSortChange={handleSortChange}
-                        onDownloadOriginal={handleDownloadOriginal}
-                        onDownloadSigned={handleDownloadSigned}
-                    />
+                    <div className="space-y-3">
+                        <DocumentTable
+                            documents={paginatedDocuments}
+                            sortBy={sortBy}
+                            sortDirection={sortDirection}
+                            onSortChange={handleSortChange}
+                            onDownloadOriginal={handleDownloadOriginal}
+                            onDownloadSigned={handleDownloadSigned}
+                        />
+
+                        <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+                            <p className="text-sm text-slate-500">
+                                Menampilkan {(currentPage - 1) * DOCUMENTS_PER_PAGE + 1}-{Math.min(currentPage * DOCUMENTS_PER_PAGE, filteredDocuments.length)} dari {filteredDocuments.length} dokumen
+                            </p>
+                            <div className="flex items-center gap-2">
+                                <Button
+                                    variant="outline"
+                                    className="border-slate-300"
+                                    onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
+                                    disabled={currentPage === 1}
+                                >
+                                    Sebelumnya
+                                </Button>
+                                <span className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700">
+                                    {currentPage} / {totalPages}
+                                </span>
+                                <Button
+                                    variant="outline"
+                                    className="border-slate-300"
+                                    onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
+                                    disabled={currentPage === totalPages}
+                                >
+                                    Berikutnya
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
                 )}
             </div>
         </AppShell>

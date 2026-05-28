@@ -18,10 +18,11 @@
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
     "test:e2e": "jest --config ./test/jest-e2e.json",
-    "db:seed": "ts-node prisma/seed.ts"
+    "db:seed": "prisma generate && ts-node prisma/seed.ts",
+    "db:reset-superadmin": "prisma generate && ts-node prisma/reset-superadmin.ts"
   },
   "prisma": {
-    "seed": "ts-node prisma/seed.ts"
+    "seed": "prisma generate && ts-node prisma/seed.ts"
   },
   "dependencies": {
     "@nestjs/bull": "^11.0.4",
@@ -39,6 +40,7 @@
     "@signpdf/placeholder-plain": "^3.3.0",
     "@signpdf/signer-p12": "^3.3.0",
     "@signpdf/signpdf": "^3.3.0",
+    "@types/qrcode": "^1.5.6",
     "bcrypt": "^6.0.0",
     "bull": "^4.16.5",
     "cache-manager": "^7.2.8",
@@ -46,6 +48,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "date-fns": "^4.1.0",
+    "ethers": "^6.16.0",
     "file-type": "^22.0.1",
     "multer": "^2.1.1",
     "node-forge": "^1.4.0",
@@ -54,6 +57,7 @@
     "passport-jwt": "^4.0.1",
     "pdf-lib": "^1.17.1",
     "pg": "^8.19.0",
+    "qrcode": "^1.5.4",
     "redis": "^5.11.0",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1",

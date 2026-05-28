@@ -107,29 +107,27 @@ export default function OtpVerifyForm({
     };
 
     return (
-        <Card className="w-full max-w-md">
-            <CardHeader className="space-y-2">
-                <CardTitle className="flex items-center gap-2">
-                    <Lock className="w-5 h-5" />
-                    Verifikasi Kode OTP
+        <Card className="border-none bg-transparent shadow-none w-full max-w-md">
+            <CardHeader className="px-0 pt-0 pb-6">
+                <CardTitle className="text-3xl font-extrabold tracking-tight text-slate-900">
+                    Verifikasi Email
                 </CardTitle>
-                <CardDescription>
-                    Masukkan 6 digit kode yang telah dikirim ke <br />
-                    <span className="font-semibold text-foreground">{email}</span>
+                <CardDescription className="text-slate-500 mt-1">
+                    Masukkan 6 digit kode keamanan yang telah dikirimkan ke <span className="font-bold text-indigo-600 break-all">{email}</span>
                 </CardDescription>
             </CardHeader>
 
-            <CardContent>
-                <form onSubmit={handleSubmit} className="space-y-4">
+            <CardContent className="px-0">
+                <form onSubmit={handleSubmit} className="space-y-5">
                     {/* Error Alert */}
                     {error && (
-                        <Alert className="border-red-200 bg-red-50 dark:bg-red-900/20">
+                        <Alert className="border-red-200 bg-red-50/80 backdrop-blur-sm rounded-xl shadow-sm">
                             <AlertCircle className="h-4 w-4 text-red-600" />
-                            <AlertDescription className="text-red-800 dark:text-red-300">
+                            <AlertDescription className="text-red-800 font-medium text-xs">
                                 {error}
                                 {remainingAttempts && (
-                                    <p className="mt-1 text-xs">
-                                        Sisa percobaan: {remainingAttempts}
+                                    <p className="mt-1 text-[11px] font-bold text-red-700">
+                                        Sisa percobaan: {remainingAttempts} kali
                                     </p>
                                 )}
                             </AlertDescription>
@@ -138,7 +136,7 @@ export default function OtpVerifyForm({
 
                     {/* OTP Input */}
                     <div className="space-y-2">
-                        <label className="text-sm font-medium">Kode OTP</label>
+                        <label className="text-xs font-semibold text-slate-700 uppercase tracking-wider">Kode Keamanan OTP</label>
                         <div className="flex gap-2 justify-center">
                             {otp.map((digit, index) => (
                                 <Input
@@ -153,29 +151,27 @@ export default function OtpVerifyForm({
                                     onChange={(e) => handleOtpChange(index, e.target.value)}
                                     onKeyDown={(e) => handleKeyDown(index, e)}
                                     disabled={loading}
-                                    className="w-12 h-12 text-center text-lg font-bold"
+                                    className="w-12 h-12 text-center text-xl font-extrabold border-slate-200 bg-white/70 backdrop-blur-sm rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all"
                                     placeholder="•"
                                 />
                             ))}
                         </div>
                     </div>
 
-                    {/* Info Text */}
-                    <p className="text-xs text-gray-500 dark:text-gray-400 text-center">
-                        ⏱️ Batas maksimal: 5 percobaan
-                        <br />
-                        🔒 Jika gagal 5x, akun akan terkunci 30 menit
-                    </p>
+                    {/* Info Text Box */}
+                    <div className="rounded-xl border border-indigo-50/60 bg-indigo-50/20 p-3 text-center text-xs text-slate-500">
+                        <p className="font-medium">⏱️ Batas maksimal: 5 kali percobaan</p>
+                        <p className="mt-0.5 text-[11px] text-slate-400">Jika salah 5 kali berturut-turut, akun akan terkunci selama 30 menit demi alasan keamanan.</p>
+                    </div>
 
                     {/* Submit Button */}
                     <Button
                         type="submit"
                         disabled={loading || otp.join('').length !== 6}
-                        className="w-full"
-                        size="lg"
+                        className="w-full h-11 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white font-semibold shadow-lg shadow-indigo-600/20 transition-all duration-300 disabled:opacity-50 mt-2"
                     >
                         {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        {loading ? 'Memverifikasi...' : 'Verifikasi'}
+                        {loading ? 'Memverifikasi...' : 'Verifikasi & Lanjutkan'}
                     </Button>
                 </form>
             </CardContent>

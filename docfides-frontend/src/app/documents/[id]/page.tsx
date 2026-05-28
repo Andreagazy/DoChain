@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
+import { ArrowRight, Users } from 'lucide-react';
 import { AxiosError } from 'axios';
 import { AppShell } from '@/components/layout/app-shell';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,6 +10,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { getCertificationEligibility, getCertificationDocumentFile } from '@/lib/auth-service';
+import { buildCertificationStepHref, getDocumentNextCertificationStep } from '@/lib/certification-flow';
 import type { CertificationEligibilityResponse } from '@/types/auth';
 
 function normalizeErrorMessage(err: unknown): string {
@@ -18,6 +20,7 @@ function normalizeErrorMessage(err: unknown): string {
 }
 
 export default function DocumentDetailPage() {
+    const router = useRouter();
     const params = useParams<{ id: string }>();
     const documentId = params.id;
 
@@ -70,8 +73,32 @@ export default function DocumentDetailPage() {
         ];
     }, [eligibility]);
 
+    const nextStep = useMemo(() => {
+        if (!eligibility) {
+            return null;
+        }
+
+        return getDocumentNextCertificationStep(eligibility.document.status);
+    }, [eligibility]);
+
+    const nextActionLabel = useMemo(() => {
+        if (!eligibility || !nextStep) {
+            return 'Lanjutkan';
+        }
+
+        if (nextStep === 'signers') {
+            return 'Tambah Signer';
+        }
+
+        if (nextStep === 'placeholders') {
+            return 'Atur Placeholder';
+        }
+
+        return 'Buka Review dan Sign';
+    }, [eligibility, nextStep]);
+
     return (
-        <AppShell title="Document Detail" subtitle="Preview, certification history, and signature state.">
+        <AppShell title="Document Detail" subtitle="Lihat status dokumen dan lanjutkan langkah sertifikasi.">
             <div className="space-y-6">
                 {error ? (
                     <Alert className="border-red-200 bg-red-50 text-red-800">
@@ -85,7 +112,7 @@ export default function DocumentDetailPage() {
 
                 {!loading && eligibility ? (
                     <div className="grid grid-cols-1 gap-6 xl:grid-cols-[2fr_1fr]">
-                        <Card className="border-slate-200 bg-white/90 shadow-sm">
+                        <Card className="rounded-lg border-blue-100 bg-white shadow-sm">
                             <CardHeader>
                                 <CardTitle>Document Preview</CardTitle>
                                 <CardDescription>
@@ -94,7 +121,7 @@ export default function DocumentDetailPage() {
                             </CardHeader>
                             <CardContent>
                                 {previewUrl ? (
-                                    <iframe src={previewUrl} title="Document preview" className="h-[680px] w-full rounded-md border border-slate-200" />
+                                    <iframe src={previewUrl} title="Document preview" className="h-[680px] w-full rounded-md border border-blue-100" />
                                 ) : (
                                     <div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
                                         Preview unavailable.
@@ -104,15 +131,15 @@ export default function DocumentDetailPage() {
                         </Card>
 
                         <div className="space-y-6">
-                            <Card className="border-slate-200 bg-white/90 shadow-sm">
+                            <Card className="rounded-lg border-blue-100 bg-white shadow-sm">
                                 <CardHeader>
-                                    <CardTitle>Digital Signature Status</CardTitle>
-                                    <CardDescription>Current certification state for this document.</CardDescription>
+                                    <CardTitle>Status Dokumen</CardTitle>
+                                    <CardDescription>Gunakan tombol lanjut sesuai kondisi dokumen.</CardDescription>
                                 </CardHeader>
                                 <CardContent className="space-y-3 text-sm">
                                     <div className="flex items-center justify-between">
                                         <span className="text-slate-600">Document status</span>
-                                        <Badge variant={eligibility.canSignCertification ? 'warning' : 'neutral'}>
+                                        <Badge variant={eligibility.canSignCertification ? 'warning' : 'default'}>
                                             {eligibility.document.status}
                                         </Badge>
                                     </div>
@@ -124,10 +151,23 @@ export default function DocumentDetailPage() {
                                         <span className="text-slate-600">Can start cert</span>
                                         <span className="font-medium text-slate-900">{String(eligibility.canStartCertification)}</span>
                                     </div>
+                                    <Button
+                                        className="mt-3 w-full"
+                                        onClick={() => nextStep && router.push(buildCertificationStepHref(nextStep, eligibility.document.id))}
+                                    >
+                                        {nextStep === 'signers' ? <Users className="h-4 w-4" /> : null}
+                                        {nextActionLabel}
+                                        <ArrowRight className="h-4 w-4" />
+                                    </Button>
+                                    {eligibility.reason ? (
+                                        <p className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+                                            {eligibility.reason}
+                                        </p>
+                                    ) : null}
                                 </CardContent>
                             </Card>
 
-                            <Card className="border-slate-200 bg-white/90 shadow-sm">
+                            <Card className="rounded-lg border-blue-100 bg-white shadow-sm">
                                 <CardHeader>
                                     <CardTitle>Certification Timeline</CardTitle>
                                     <CardDescription>Progress from upload to completion.</CardDescription>

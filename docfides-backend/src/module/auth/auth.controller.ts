@@ -17,15 +17,21 @@ import { VerifyOtpDto } from '../email/dto/verify-otp.dto';
 import { RegisterDto } from './dto/register.dto';
 import { JwtAuthGuard } from './guard/jwt.guard';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private authService: AuthService) { }
+  constructor(private authService: AuthService) {}
 
   @Get('me')
   @UseGuards(JwtAuthGuard)
   async getProfile(@Req() req: Request & { user: { userId: string } }) {
     return this.authService.getProfile(req.user.userId);
+  }
+
+  @Get('register-options')
+  async getRegisterOptions() {
+    return this.authService.getRegisterOptions();
   }
 
   @Patch('profile')
@@ -35,6 +41,15 @@ export class AuthController {
     @Body() dto: UpdateProfileDto,
   ) {
     return this.authService.updateProfile(req.user.userId, dto);
+  }
+
+  @Patch('password')
+  @UseGuards(JwtAuthGuard)
+  async changePassword(
+    @Req() req: Request & { user: { userId: string } },
+    @Body() dto: ChangePasswordDto,
+  ) {
+    return this.authService.changePassword(req.user.userId, dto);
   }
 
   @Post('login')
@@ -60,10 +75,6 @@ export class AuthController {
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
   async register(@Body() dto: RegisterDto) {
-    return this.authService.register(
-      dto.email,
-      dto.password,
-      dto.confirmPassword,
-    );
+    return this.authService.register(dto);
   }
 }

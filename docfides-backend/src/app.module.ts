@@ -9,6 +9,8 @@ import { PrismaModule } from './module/prisma/prisma.module';
 import { EmailModule } from './module/email/email.module';
 import { IdentityModule } from './module/identity/identity.module';
 import { CertificationModule } from './module/certification/certification.module';
+import { AdminModule } from './module/admin/admin.module';
+import { PublicModule } from './module/public/public.module';
 import { BullModule } from '@nestjs/bull';
 import { CacheModule } from '@nestjs/cache-manager';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -53,8 +55,10 @@ import { ScheduleModule } from '@nestjs/schedule';
     EmailModule,
     IdentityModule,
     CertificationModule,
+    AdminModule,
+    PublicModule,
   ],
   controllers: [AppController, PrismaController],
   providers: [AppService, PrismaService],
 })
-export class AppModule { }
+export class AppModule {}

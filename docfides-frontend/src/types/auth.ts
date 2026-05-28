@@ -2,6 +2,11 @@ export interface RegisterDto {
   email: string;
   password: string;
   confirmPassword: string;
+  displayName: string;
+  nim: string;
+  prodiId: string;
+  angkatan?: number;
+  kelas?: string;
 }
 
 export interface LoginDto {
@@ -21,9 +26,39 @@ export interface VerifyOtpDto {
 export interface User {
   id: string;
   email: string;
-  role: string;
+  role: UserRole;
   displayName?: string | null;
   identityStatus?: IdentityStatus | null;
+  academicProfile?: AcademicProfile | null;
+}
+
+export type UserRole =
+  | 'SUPERADMIN'
+  | 'JURUSAN'
+  | 'PRODI'
+  | 'ADMIN_PRODI'
+  | 'PEGAWAI'
+  | 'MAHASISWA';
+
+export interface AcademicProfile {
+  type: 'STUDENT' | 'EMPLOYEE';
+  identifier?: string | null;
+  unitCode: string;
+  unitName: string;
+  unitType: 'JURUSAN' | 'PRODI';
+  angkatan?: number | null;
+  kelas?: string | null;
+  employeeType?: string;
+  positionTitle?: string | null;
+  label?: string;
+  structuralPositions?: Array<{
+    position: string;
+    academicUnit: {
+      code: string;
+      name: string;
+      type: 'JURUSAN' | 'PRODI';
+    };
+  }>;
 }
 
 export type IdentityStatus =
@@ -61,7 +96,7 @@ export interface IdentityProfileResponse {
 export interface SubmitIdentityDto {
   nik: string;
   fullName: string;
-  birthPlace?: string;
+  birthPlace: string;
   birthDate: string;
   address: string;
 }
@@ -83,6 +118,25 @@ export interface AuthResponse {
   message: string;
   access_token: string;
   user: User;
+}
+
+export interface RegisterOptionsResponse {
+  prodi: Array<{
+    id: string;
+    code: string;
+    name: string;
+    parentId: string | null;
+  }>;
+}
+
+export interface UpdateProfilePayload {
+  displayName?: string;
+}
+
+export interface ChangePasswordPayload {
+  currentPassword: string;
+  newPassword: string;
+  confirmPassword: string;
 }
 
 export interface OtpResponse {
@@ -130,6 +184,9 @@ export interface RequestSignersResponse {
     userId: string;
     email: string | null;
     displayName: string | null;
+    role?: UserRole | null;
+    signerLevel?: number | null;
+    academicProfile?: AcademicProfile | null;
     preferredSignatureMode: SignatureMode;
     status: string;
     order: number | null;
@@ -213,7 +270,11 @@ export interface OwnedDocumentItem {
   status: string;
   originalFileName: string | null;
   finalFileName: string | null;
+  finalFileIpfsHash?: string | null;
+  finalFileIpfsGatewayUrl?: string | null;
+  hasVerificationQr?: boolean;
   requiredSignerCount: number;
+  signatureCount?: number;
   updatedAt: string;
 }
 
@@ -243,6 +304,9 @@ export interface SignerCandidate {
   id: string;
   email: string;
   displayName: string | null;
+  role: UserRole;
+  signerLevel: number;
+  academicProfile?: AcademicProfile | null;
   preferredSignatureMode: SignatureMode;
 }
 
@@ -267,6 +331,8 @@ export interface SignDocumentResponse {
     fileName: string;
     storagePath: string;
     hash: string;
+    ipfsHash?: string | null;
+    ipfsGatewayUrl?: string | null;
     sizeBytes: number;
   };
   signature: {
@@ -279,7 +345,231 @@ export interface SignDocumentResponse {
     status: string;
     finalFileName: string;
     finalFileHash: string;
+    finalFileIpfsHash?: string | null;
     finalFileSize: number;
     updatedAt: string;
   };
+}
+
+export interface FinalizeQrPayload {
+  page: number;
+  x: number;
+  y: number;
+  width?: number;
+  height?: number;
+}
+
+export interface FinalizeQrResponse {
+  message: string;
+  document: {
+    id: string;
+    status: string;
+    finalFileName: string;
+    finalFileHash: string;
+    finalFileIpfsHash?: string | null;
+    finalFileSize: number;
+    updatedAt: string;
+  };
+  file: {
+    fileName: string;
+    storagePath: string;
+    hash: string;
+    ipfsHash?: string | null;
+    ipfsGatewayUrl?: string | null;
+    blockchainTxHash?: string | null;
+    sizeBytes: number;
+  };
+}
+
+export interface DeclineDocumentPayload {
+  reason: string;
+}
+
+export interface IpfsStatusResponse {
+  configured: boolean;
+  connected: boolean;
+  apiUrl: string | null;
+  gatewayUrl: string | null;
+  version: string | null;
+  error: string | null;
+}
+
+export interface AdminAcademicUnit {
+  id: string;
+  code: string;
+  name: string;
+  type: 'JURUSAN' | 'PRODI';
+  parentId: string | null;
+  isActive: boolean;
+}
+
+export interface AdminUserItem {
+  id: string;
+  email: string;
+  displayName: string | null;
+  role: UserRole;
+  status: 'ACTIVE' | 'SUSPENDED' | 'DISABLED';
+  emailVerifiedAt: string | null;
+  createdAt: string;
+  identity: {
+    status: IdentityStatus;
+    fullName: string;
+    nik: string;
+  } | null;
+  studentProfile: {
+    nim: string;
+    angkatan: number | null;
+    kelas: string | null;
+    prodi: AdminAcademicUnit;
+  } | null;
+  employeeProfile: {
+    nip: string | null;
+    nidn: string | null;
+    employeeType: 'DOSEN' | 'TENAGA_KEPENDIDIKAN' | 'ADMINISTRASI';
+    positionTitle: string | null;
+    homeUnit: AdminAcademicUnit;
+  } | null;
+  structuralAssignments: Array<{
+    position: 'KAJUR' | 'KAPRODI' | 'ADMIN_PRODI';
+    academicUnit: AdminAcademicUnit;
+  }>;
+}
+
+export interface AdminUsersResponse {
+  users: AdminUserItem[];
+}
+
+export interface AdminAcademicUnitsResponse {
+  units: AdminAcademicUnit[];
+}
+
+export interface AdminOverviewResponse {
+  users: {
+    total: number;
+    active: number;
+    byRole: Array<{ role: UserRole; count: number }>;
+  };
+  identities: {
+    pending: number;
+  };
+  documents: {
+    total: number;
+    fullySigned: number;
+    revoked: number;
+    declinedSigners: number;
+    byStatus: Array<{ status: string; count: number }>;
+  };
+}
+
+export interface AdminIdentitiesResponse {
+  identities: Array<{
+    userId: string;
+    nik: string;
+    fullName: string;
+    birthPlace: string | null;
+    birthDate: string;
+    address: string;
+    ktpOriginalFileName: string | null;
+    ktpStoragePath: string | null;
+    status: IdentityStatus;
+    verifiedBy: string | null;
+    verifiedAt: string | null;
+    updatedAt: string;
+    user: {
+      email: string;
+      displayName: string | null;
+      role: UserRole;
+      status: 'ACTIVE' | 'SUSPENDED' | 'DISABLED';
+    };
+  }>;
+}
+
+export interface UpdateAdminUserPayload {
+  displayName?: string | null;
+  certificateFullName?: string | null;
+  role?: UserRole;
+  status?: 'ACTIVE' | 'SUSPENDED' | 'DISABLED';
+  studentProfile?: {
+    nim: string;
+    prodiId: string;
+    angkatan?: number | null;
+    kelas?: string | null;
+  } | null;
+  employeeProfile?: {
+    nip?: string | null;
+    nidn?: string | null;
+    employeeType: 'DOSEN' | 'TENAGA_KEPENDIDIKAN' | 'ADMINISTRASI';
+    homeUnitId: string;
+    positionTitle?: string | null;
+  } | null;
+  structuralAssignments?: Array<{
+    academicUnitId: string;
+    position: 'KAJUR' | 'KAPRODI' | 'ADMIN_PRODI';
+  }>;
+}
+
+export interface CreateAdminUserPayload {
+  email: string;
+  displayName: string;
+  role: UserRole;
+  password?: string;
+}
+
+export interface CreateAdminAcademicUnitPayload {
+  code: string;
+  name: string;
+  type: 'JURUSAN' | 'PRODI';
+  parentId?: string | null;
+}
+
+export interface UpdateAdminAcademicUnitPayload {
+  code?: string;
+  name?: string;
+  parentId?: string | null;
+  isActive?: boolean;
+}
+
+export interface AdminDocumentsResponse {
+  documents: Array<{
+    id: string;
+    originalFileName: string | null;
+    finalFileName: string | null;
+    status: string;
+    finalFileHash: string | null;
+    finalFileIpfsHash: string | null;
+    revokedAt: string | null;
+    revokeReason: string | null;
+    revokedBy: {
+      email: string;
+      displayName: string | null;
+      role: UserRole;
+    } | null;
+    createdAt: string;
+    updatedAt: string;
+    user: {
+      email: string;
+      displayName: string | null;
+    } | null;
+    requiredSigners: Array<{
+      status: string;
+      order: number | null;
+      signedAt: string | null;
+      declinedAt: string | null;
+      declineReason: string | null;
+      user: {
+        email: string;
+        displayName: string | null;
+        role: UserRole;
+      };
+    }>;
+  }>;
+}
+
+export interface RevokeAdminDocumentPayload {
+  reason: string;
+}
+
+export interface RevokeAdminDocumentResponse {
+  message: string;
+  document: AdminDocumentsResponse['documents'][number];
 }
