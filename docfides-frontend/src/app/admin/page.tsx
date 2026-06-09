@@ -172,7 +172,7 @@ export default function AdminOverviewPage() {
                             <p className="text-sm font-medium text-blue-700">Superadmin</p>
                             <h1 className="mt-0.5 text-xl font-bold text-slate-800">Kontrol Panel Sistem</h1>
                             <p className="mt-1 text-sm text-slate-600">
-                                Ringkasan real-time infrastruktur sertifikasi dokumen DoChain
+                                Ringkasan real-time infrastruktur sertifikasi dokumen DOCChain
                             </p>
                         </div>
                         <div className="hidden h-14 w-14 shrink-0 items-center justify-center rounded-2xl border border-blue-100 bg-white sm:flex">

@@ -1,12 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Input } from '@/components/ui/input';
 import {
   Loader2, AlertCircle, Eye, EyeOff, ShieldCheck, Mail, Lock,
 } from 'lucide-react';
-import { getDefaultHomePath, login, saveAuthData } from '@/lib/auth-service';
+import { getDefaultHomePath, getProfile, getToken, login, logout, saveAuthData } from '@/lib/auth-service';
 import Link from 'next/link';
 import { AxiosError } from 'axios';
 
@@ -20,7 +20,39 @@ export default function LoginPage() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function redirectIfLoggedIn() {
+      const token = getToken();
+      if (!token) {
+        setCheckingSession(false);
+        return;
+      }
+
+      try {
+        const profile = await getProfile();
+        if (cancelled) return;
+
+        saveAuthData(token, profile);
+        router.replace(getDefaultHomePath(profile));
+      } catch {
+        if (!cancelled) {
+          logout();
+          setCheckingSession(false);
+        }
+      }
+    }
+
+    void redirectIfLoggedIn();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,6 +83,20 @@ export default function LoginPage() {
     }
   };
 
+  if (checkingSession) {
+    return (
+      <div
+        className="flex min-h-screen items-center justify-center bg-blue-50 px-4 py-12"
+        style={{ background: 'linear-gradient(135deg, #dbeafe 0%, #eff6ff 50%, #e0e7ff 100%)' }}
+      >
+        <div className="flex items-center gap-2 rounded-2xl border border-blue-100 bg-white px-5 py-4 text-sm font-semibold text-slate-600 shadow-sm">
+          <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+          Memeriksa sesi login...
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       className="flex min-h-screen items-center justify-center bg-blue-50 px-4 py-12"
@@ -70,7 +116,7 @@ export default function LoginPage() {
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20">
               <ShieldCheck className="h-4 w-4 text-white" />
             </div>
-            <span className="text-sm font-bold">DoChain</span>
+            <span className="text-sm font-bold">DOCChain</span>
           </div>
 
           {/* Headline */}
@@ -84,7 +130,7 @@ export default function LoginPage() {
           </div>
 
           {/* Footer */}
-          <p className="text-xs text-blue-300">© 2026 DoChain</p>
+          <p className="text-xs text-blue-300">© 2026 DOCChain</p>
         </div>
 
         {/* ── Right: Form Panel ── */}
@@ -162,7 +208,7 @@ export default function LoginPage() {
               {loading ? (
                 <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Memverifikasi...</>
               ) : (
-                <><Lock className="mr-2 h-4 w-4" /> Masuk ke DoChain</>
+                <><Lock className="mr-2 h-4 w-4" /> Masuk ke DOCChain</>
               )}
             </button>
 

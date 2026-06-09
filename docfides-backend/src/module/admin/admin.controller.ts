@@ -83,6 +83,24 @@ export class AdminController {
     return this.adminService.reviewIdentity(req.user.userId, userId, dto);
   }
 
+  @Get('academic-profile-change-requests')
+  listAcademicProfileChangeRequests(@Req() req: RequestWithUser) {
+    return this.adminService.listAcademicProfileChangeRequests(req.user.userId);
+  }
+
+  @Patch('academic-profile-change-requests/:requestId/review')
+  reviewAcademicProfileChangeRequest(
+    @Req() req: RequestWithUser,
+    @Param('requestId') requestId: string,
+    @Body() dto: ReviewIdentityDto,
+  ) {
+    return this.adminService.reviewAcademicProfileChangeRequest(
+      req.user.userId,
+      requestId,
+      dto,
+    );
+  }
+
   @Get('academic-units')
   listAcademicUnits(@Req() req: RequestWithUser) {
     return this.adminService.listAcademicUnits(req.user.userId);

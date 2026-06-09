@@ -1,7 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { FileText, RefreshCw, Search, UploadCloud } from 'lucide-react';
 import { AxiosError } from 'axios';
 import { AppShell } from '@/components/layout/app-shell';
@@ -15,6 +14,7 @@ import {
     listMyCertificationDocuments,
     getCertificationDocumentOriginalFile,
     getCertificationDocumentSignedFile,
+    uploadDocumentForCertification,
 } from '@/lib/auth-service';
 import { OwnedDocumentItem } from '@/types/auth';
 
@@ -27,8 +27,10 @@ function normalizeErrorMessage(err: unknown): string {
 }
 
 export default function DocumentsPage() {
+    const fileInputRef = useRef<HTMLInputElement | null>(null);
     const [documents, setDocuments] = useState<OwnedDocumentItem[]>([]);
     const [loading, setLoading] = useState(true);
+    const [uploading, setUploading] = useState(false);
     const [error, setError] = useState('');
 
     const [search, setSearch] = useState('');
@@ -66,14 +68,14 @@ export default function DocumentsPage() {
 
         const bySearch = byFilter.filter((doc) => {
             if (!searchTerm) return true;
-            const name = (doc.originalFileName ?? doc.id).toLowerCase();
-            return name.includes(searchTerm) || doc.id.toLowerCase().includes(searchTerm);
+            const name = (doc.originalFileName ?? doc.finalFileName ?? '').toLowerCase();
+            return name.includes(searchTerm);
         });
 
         const sorted = [...bySearch].sort((a, b) => {
             if (sortBy === 'name') {
-                const aName = (a.originalFileName ?? a.id).toLowerCase();
-                const bName = (b.originalFileName ?? b.id).toLowerCase();
+                const aName = (a.originalFileName ?? a.finalFileName ?? '').toLowerCase();
+                const bName = (b.originalFileName ?? b.finalFileName ?? '').toLowerCase();
                 return sortDirection === 'asc' ? aName.localeCompare(bName) : bName.localeCompare(aName);
             }
 
@@ -125,6 +127,20 @@ export default function DocumentsPage() {
         URL.revokeObjectURL(url);
     };
 
+    const buildSignedDownloadName = (doc: OwnedDocumentItem) => {
+        const baseName = (doc.originalFileName ?? doc.finalFileName ?? 'dokumen')
+            .replace(/\.pdf$/i, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+        const safeBaseName = baseName
+            .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+            .replace(/\.+$/g, '')
+            .replace(/-+/g, '-')
+            .trim() || 'dokumen';
+
+        return `${safeBaseName}-signed.pdf`;
+    };
+
     const handleDownloadOriginal = async (doc: OwnedDocumentItem) => {
         try {
             const blob = await getCertificationDocumentOriginalFile(doc.id);
@@ -137,9 +153,43 @@ export default function DocumentsPage() {
     const handleDownloadSigned = async (doc: OwnedDocumentItem) => {
         try {
             const blob = await getCertificationDocumentSignedFile(doc.id);
-            triggerDownload(blob, doc.finalFileName ?? `${doc.id}-signed.pdf`);
+            triggerDownload(blob, buildSignedDownloadName(doc));
         } catch (err) {
             setError(normalizeErrorMessage(err));
+        }
+    };
+
+    const handleUploadClick = () => {
+        if (uploading) {
+            return;
+        }
+
+        fileInputRef.current?.click();
+    };
+
+    const handleFileSelected = async (event: ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        event.target.value = '';
+
+        if (!file) {
+            return;
+        }
+
+        setError('');
+
+        if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+            setError('File dokumen harus berupa PDF.');
+            return;
+        }
+
+        setUploading(true);
+        try {
+            await uploadDocumentForCertification(file);
+            await loadDocuments();
+        } catch (err) {
+            setError(normalizeErrorMessage(err));
+        } finally {
+            setUploading(false);
         }
     };
 
@@ -154,11 +204,16 @@ export default function DocumentsPage() {
                             Lihat status, unduh file, dan buka langkah sertifikasi berikutnya dari satu tabel.
                         </p>
                     </div>
-                    <Button asChild>
-                        <Link href="/documents/upload">
-                            <UploadCloud className="h-4 w-4" />
-                            Upload Dokumen
-                        </Link>
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="application/pdf,.pdf"
+                        className="hidden"
+                        onChange={(event) => void handleFileSelected(event)}
+                    />
+                    <Button onClick={handleUploadClick} disabled={uploading}>
+                        <UploadCloud className="h-4 w-4" />
+                        {uploading ? 'Mengupload...' : 'Upload Dokumen'}
                     </Button>
                 </section>
 
@@ -174,7 +229,7 @@ export default function DocumentsPage() {
                         <Input
                             aria-label="Search documents"
                             className="bg-white pl-9"
-                            placeholder="Cari nama file atau ID dokumen"
+                            placeholder="Cari nama file dokumen"
                             value={search}
                             onChange={(event) => setSearch(event.target.value)}
                         />

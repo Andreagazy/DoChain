@@ -22,6 +22,8 @@ const structuralPositionByRole: Partial<Record<UserRole, 'KAJUR' | 'KAPRODI' | '
     PRODI: 'KAPRODI',
     ADMIN_PRODI: 'ADMIN_PRODI',
 };
+const onlyDigits = (value: string) => value.replace(/\D/g, '');
+const onlyNameCharacters = (value: string) => value.replace(/[^\p{L}\s.'-]/gu, '');
 
 type UserDraft = {
     displayName: string;
@@ -260,7 +262,7 @@ export default function AdminUserEditPage() {
                         <div className="grid gap-3 md:grid-cols-3">
                             <div className="space-y-1.5">
                                 <label className="text-xs font-medium text-slate-600">Nama tampilan</label>
-                                <Input disabled={profileFieldsDisabled} value={draft.displayName} onChange={(event) => setDraft((current) => current ? { ...current, displayName: event.target.value } : current)} placeholder="Nama tampilan" />
+                                <Input disabled={profileFieldsDisabled} value={draft.displayName} onChange={(event) => setDraft((current) => current ? { ...current, displayName: onlyNameCharacters(event.target.value) } : current)} placeholder="Nama tampilan" />
                             </div>
                             {isSuperadmin ? (
                                 <div className="space-y-1.5">
@@ -268,7 +270,7 @@ export default function AdminUserEditPage() {
                                     <Input
                                         disabled={saving}
                                         value={draft.certificateFullName}
-                                        onChange={(event) => setDraft((current) => current ? { ...current, certificateFullName: event.target.value } : current)}
+                                        onChange={(event) => setDraft((current) => current ? { ...current, certificateFullName: onlyNameCharacters(event.target.value) } : current)}
                                         placeholder={user.identity ? 'Nama sesuai identitas' : 'Fallback ke nama tampilan'}
                                     />
                                     <p className="text-[11px] leading-4 text-slate-500">
@@ -303,7 +305,7 @@ export default function AdminUserEditPage() {
                             <div className="grid gap-3 md:grid-cols-4">
                                 <div className="space-y-1.5">
                                     <label className="text-xs font-medium text-slate-600">NIM mahasiswa</label>
-                                    <Input disabled={profileFieldsDisabled} value={draft.nim} onChange={(event) => setDraft((current) => current ? { ...current, nim: event.target.value } : current)} placeholder="NIM" />
+                                    <Input disabled={profileFieldsDisabled} value={draft.nim} onChange={(event) => setDraft((current) => current ? { ...current, nim: onlyDigits(event.target.value).slice(0, 40) } : current)} placeholder="NIM" inputMode="numeric" />
                                 </div>
                                 <div className="space-y-1.5">
                                     <label className="text-xs font-medium text-slate-600">Program studi</label>
@@ -314,7 +316,7 @@ export default function AdminUserEditPage() {
                                 </div>
                                 <div className="space-y-1.5">
                                     <label className="text-xs font-medium text-slate-600">Angkatan</label>
-                                    <Input disabled={profileFieldsDisabled} value={draft.angkatan} onChange={(event) => setDraft((current) => current ? { ...current, angkatan: event.target.value } : current)} placeholder="Angkatan" />
+                                    <Input disabled={profileFieldsDisabled} value={draft.angkatan} onChange={(event) => setDraft((current) => current ? { ...current, angkatan: onlyDigits(event.target.value).slice(0, 4) } : current)} placeholder="Angkatan" inputMode="numeric" />
                                 </div>
                                 <div className="space-y-1.5">
                                     <label className="text-xs font-medium text-slate-600">Kelas</label>
@@ -326,11 +328,11 @@ export default function AdminUserEditPage() {
                                 <div className="grid gap-3 md:grid-cols-3">
                                     <div className="space-y-1.5">
                                         <label className="text-xs font-medium text-slate-600">NIP pegawai</label>
-                                        <Input disabled={profileFieldsDisabled} value={draft.nip} onChange={(event) => setDraft((current) => current ? { ...current, nip: event.target.value } : current)} placeholder="NIP" />
+                                        <Input disabled={profileFieldsDisabled} value={draft.nip} onChange={(event) => setDraft((current) => current ? { ...current, nip: onlyDigits(event.target.value).slice(0, 40) } : current)} placeholder="NIP" inputMode="numeric" />
                                     </div>
                                     <div className="space-y-1.5">
                                         <label className="text-xs font-medium text-slate-600">NIDN dosen</label>
-                                        <Input disabled={profileFieldsDisabled} value={draft.nidn} onChange={(event) => setDraft((current) => current ? { ...current, nidn: event.target.value } : current)} placeholder="NIDN" />
+                                        <Input disabled={profileFieldsDisabled} value={draft.nidn} onChange={(event) => setDraft((current) => current ? { ...current, nidn: onlyDigits(event.target.value).slice(0, 40) } : current)} placeholder="NIDN" inputMode="numeric" />
                                     </div>
                                     <div className="space-y-1.5">
                                         <label className="text-xs font-medium text-slate-600">Tipe pegawai</label>
@@ -349,7 +351,7 @@ export default function AdminUserEditPage() {
                                     </div>
                                     <div className="space-y-1.5">
                                         <label className="text-xs font-medium text-slate-600">Nama jabatan</label>
-                                        <Input disabled={profileFieldsDisabled} value={draft.positionTitle} onChange={(event) => setDraft((current) => current ? { ...current, positionTitle: event.target.value } : current)} placeholder="Jabatan" />
+                                        <Input disabled={profileFieldsDisabled} value={draft.positionTitle} onChange={(event) => setDraft((current) => current ? { ...current, positionTitle: onlyNameCharacters(event.target.value).slice(0, 120) } : current)} placeholder="Jabatan" />
                                     </div>
                                     {isSuperadmin && (draft.role === 'JURUSAN' || draft.role === 'PRODI' || draft.role === 'ADMIN_PRODI') ? (
                                         <div className="space-y-1.5">

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { CheckCircle2, ExternalLink, Loader2, PenLine, PlayCircle, XCircle } from 'lucide-react';
+import { CheckCircle2, Clock3, Eye, FileText, Inbox, Loader2, PenLine, ShieldCheck, XCircle } from 'lucide-react';
 import {
     Alert,
     AlertDescription,
@@ -41,6 +41,37 @@ type DeclineDialogState = {
 } | null;
 
 const ASSIGNMENTS_PER_PAGE = 5;
+const INACTIVE_DOCUMENT_STATUSES = ['REVOKED', 'REJECTED'];
+
+const documentStatusLabels: Record<string, string> = {
+    REVOKED: 'Dicabut',
+    REJECTED: 'Ditolak',
+    FULLY_SIGNED: 'Final',
+    PARTIALLY_SIGNED: 'Sebagian Ditandatangani',
+    PENDING_SIGNATURES: 'Menunggu Tanda Tangan',
+    PENDING_SIGNATURE: 'Menunggu Tanda Tangan',
+    DRAFT: 'Draft',
+    UPLOADED: 'Baru Diupload',
+};
+
+const signerStatusLabels: Record<string, string> = {
+    PENDING: 'Menunggu Tanda Tangan',
+    SIGNED: 'Sudah Ditandatangani',
+    REJECTED: 'Ditolak',
+};
+
+const getDocumentStatusLabel = (status: string) =>
+    documentStatusLabels[status] ?? status.replaceAll('_', ' ');
+
+const getSignerStatusLabel = (status: string) =>
+    signerStatusLabels[status] ?? status.replaceAll('_', ' ');
+
+const getAssignmentTitle = (assignment: AssignedDocumentItem) =>
+    assignment.document.originalFileName ?? assignment.document.finalFileName ?? 'Dokumen PDF';
+
+const isAssignmentActionable = (assignment: AssignedDocumentItem) =>
+    assignment.signerStatus === 'PENDING' &&
+    !INACTIVE_DOCUMENT_STATUSES.includes(assignment.document.status);
 
 export default function CertificationAssignedDocumentsPage() {
     const router = useRouter();
@@ -60,12 +91,17 @@ export default function CertificationAssignedDocumentsPage() {
     const [declineReason, setDeclineReason] = useState('');
 
     const pendingAssignments = useMemo(
-        () => assignments.filter((assignment) => assignment.signerStatus === 'PENDING'),
+        () => assignments.filter(isAssignmentActionable),
         [assignments],
     );
 
     const signedAssignments = useMemo(
         () => assignments.filter((assignment) => assignment.signerStatus === 'SIGNED'),
+        [assignments],
+    );
+
+    const inactiveAssignments = useMemo(
+        () => assignments.filter((assignment) => INACTIVE_DOCUMENT_STATUSES.includes(assignment.document.status)),
         [assignments],
     );
 
@@ -106,7 +142,7 @@ export default function CertificationAssignedDocumentsPage() {
                 ]);
 
                 if (identityStatus.status !== 'APPROVED') {
-                    router.push('/identity');
+                    router.push('/profile#identitas-ktp');
                     return;
                 }
 
@@ -172,7 +208,7 @@ export default function CertificationAssignedDocumentsPage() {
         setPreviewState({
             documentId: assignment.document.id,
             url: '',
-            title: assignment.document.originalFileName ?? assignment.document.id,
+            title: getAssignmentTitle(assignment),
         });
     };
 
@@ -185,17 +221,21 @@ export default function CertificationAssignedDocumentsPage() {
         await execute('Sign Dokumen', async () => {
             await signDocumentCertification(documentId, {
                 mode: preferredMode,
-                reason: 'DoChain digital signature',
+                reason: 'DOCChain digital signature',
             });
             await refreshAssignments();
         });
     };
 
     const openDeclineDialog = (assignment: AssignedDocumentItem) => {
+        if (!isAssignmentActionable(assignment)) {
+            return;
+        }
+
         setDeclineReason('');
         setDeclineDialog({
             documentId: assignment.document.id,
-            title: assignment.document.originalFileName ?? assignment.document.id,
+            title: getAssignmentTitle(assignment),
         });
     };
 
@@ -230,36 +270,78 @@ export default function CertificationAssignedDocumentsPage() {
     }
 
     return (
-        <AppShell title="Need Signature" subtitle="Dokumen yang menunggu tanda tangan Anda.">
-            <div className="space-y-6">
-                <section className="rounded-lg border border-blue-100 bg-white p-6 shadow-sm">
-                    <Badge variant="default">Assigned Documents</Badge>
-                    <h1 className="mt-4 text-2xl font-semibold text-slate-950 md:text-3xl">Tinjau lalu tanda tangani dokumen.</h1>
-                    <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                        Preview dokumen sebelum sign, lalu selesaikan permintaan yang masih pending.
-                    </p>
+        <AppShell title="Perlu Ditandatangani" subtitle="Tinjau dokumen yang menunggu tanda tangan Anda.">
+            <div className="space-y-5">
+                <section className="rounded-2xl border border-blue-100 bg-blue-50 p-6 shadow-sm">
+                    <Badge className="rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-bold uppercase tracking-wide text-blue-700 hover:bg-white">Perlu Ditandatangani</Badge>
+                    <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                        <div>
+                            <h1 className="text-2xl font-bold tracking-tight text-slate-950 md:text-3xl">Tinjau dokumen sebelum tanda tangan.</h1>
+                            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                                Buka preview dokumen, pastikan isinya benar, lalu tanda tangani atau tolak dengan alasan yang jelas.
+                            </p>
+                        </div>
+                        <Button variant="outline" className="w-fit rounded-xl border-blue-200 bg-white font-semibold text-blue-700 hover:bg-blue-50" onClick={() => router.push('/certification')}>
+                            Kembali ke Sertifikasi
+                        </Button>
+                    </div>
                 </section>
 
-                <div className="grid gap-4 md:grid-cols-3">
-                    <Card className="rounded-lg border-blue-100 bg-white shadow-sm">
-                        <CardContent className="pt-6">
-                            <p className="text-xs uppercase tracking-wide text-slate-500">Pending</p>
-                            <p className="mt-2 text-3xl font-semibold text-slate-900">{pendingAssignments.length}</p>
-                            <p className="mt-1 text-sm text-slate-600">Dokumen menunggu tanda tangan Anda.</p>
+                <div className="grid gap-3 md:grid-cols-4">
+                    <Card className="gap-0 rounded-2xl border-blue-100 bg-white py-0 shadow-sm">
+                        <CardContent className="p-4">
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Menunggu</p>
+                                    <p className="mt-2 text-3xl font-bold text-slate-900">{pendingAssignments.length}</p>
+                                    <p className="mt-1 text-xs text-slate-600">Siap ditinjau</p>
+                                </div>
+                                <span className="rounded-xl bg-amber-50 p-2 text-amber-700">
+                                    <Clock3 className="h-5 w-5" />
+                                </span>
+                            </div>
                         </CardContent>
                     </Card>
-                    <Card className="rounded-lg border-blue-100 bg-white shadow-sm">
-                        <CardContent className="pt-6">
-                            <p className="text-xs uppercase tracking-wide text-slate-500">Signed</p>
-                            <p className="mt-2 text-3xl font-semibold text-slate-900">{signedAssignments.length}</p>
-                            <p className="mt-1 text-sm text-slate-600">Dokumen yang sudah Anda selesaikan.</p>
+                    <Card className="gap-0 rounded-2xl border-blue-100 bg-white py-0 shadow-sm">
+                        <CardContent className="p-4">
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Selesai</p>
+                                    <p className="mt-2 text-3xl font-bold text-slate-900">{signedAssignments.length}</p>
+                                    <p className="mt-1 text-xs text-slate-600">Sudah ditandatangani</p>
+                                </div>
+                                <span className="rounded-xl bg-emerald-50 p-2 text-emerald-700">
+                                    <CheckCircle2 className="h-5 w-5" />
+                                </span>
+                            </div>
                         </CardContent>
                     </Card>
-                    <Card className="rounded-lg border-blue-100 bg-white shadow-sm">
-                        <CardContent className="pt-6">
-                            <p className="text-xs uppercase tracking-wide text-slate-500">Mode</p>
-                            <p className="mt-2 text-3xl font-semibold text-slate-900">{preferredMode === 'visible' ? 'Visible' : 'Invisible'}</p>
-                            <p className="mt-1 text-sm text-slate-600">{hasSignature ? 'Signature asset siap dipakai.' : 'Visible mode masih butuh signature asset.'}</p>
+                    <Card className="gap-0 rounded-2xl border-blue-100 bg-white py-0 shadow-sm">
+                        <CardContent className="p-4">
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Nonaktif</p>
+                                    <p className="mt-2 text-3xl font-bold text-slate-900">{inactiveAssignments.length}</p>
+                                    <p className="mt-1 text-xs text-slate-600">Dicabut/ditolak</p>
+                                </div>
+                                <span className="rounded-xl bg-slate-100 p-2 text-slate-600">
+                                    <Inbox className="h-5 w-5" />
+                                </span>
+                            </div>
+                        </CardContent>
+                    </Card>
+                    <Card className="gap-0 rounded-2xl border-blue-100 bg-white py-0 shadow-sm">
+                        <CardContent className="p-4">
+                            <div className="flex items-start justify-between gap-3">
+                                <div>
+                                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Mode TTD</p>
+                                    <p className="mt-2 text-xl font-bold text-slate-900">{preferredMode === 'visible' ? 'Visible' : 'Invisible'}</p>
+                                    <p className="mt-1 text-xs text-slate-600">{hasSignature ? 'Asset siap' : 'Perlu setup'}</p>
+                                </div>
+                                <span className="rounded-xl bg-blue-50 p-2 text-blue-700">
+                                    <ShieldCheck className="h-5 w-5" />
+                                </span>
+                            </div>
                         </CardContent>
                     </Card>
                 </div>
@@ -277,60 +359,95 @@ export default function CertificationAssignedDocumentsPage() {
                     </Alert>
                 ) : null}
 
-                <Card className="rounded-lg border-blue-100 bg-white shadow-sm">
-                    <CardHeader>
+                <Card className="gap-0 overflow-hidden rounded-2xl border-blue-100 bg-white py-0 shadow-sm">
+                    <CardHeader className="border-b border-slate-100 bg-white p-5">
                         <CardTitle>Daftar Dokumen</CardTitle>
-                        <CardDescription>Setiap kartu bisa dibuka preview dulu sebelum menandatangani.</CardDescription>
+                        <CardDescription>Preview dokumen terlebih dahulu sebelum mengambil keputusan.</CardDescription>
                     </CardHeader>
-                    <CardContent className="space-y-3">
+                    <CardContent className="space-y-3 p-4">
                         {assignments.length === 0 ? (
-                            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
-                                Belum ada dokumen untuk Anda tandatangani.
+                            <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-10 text-center text-sm text-slate-500">
+                                <FileText className="mx-auto mb-2 h-8 w-8 text-slate-300" />
+                                <p className="font-semibold text-slate-700">Belum ada dokumen untuk Anda tandatangani.</p>
                             </div>
                         ) : (
-                            paginatedAssignments.map((assignment) => (
+                            paginatedAssignments.map((assignment) => {
+                                const actionable = isAssignmentActionable(assignment);
+                                const inactive = INACTIVE_DOCUMENT_STATUSES.includes(assignment.document.status);
+
+                                return (
                                 <div
                                     key={`${assignment.document.id}-${assignment.order ?? 'x'}`}
-                                    className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between"
+                                    className={`grid gap-4 rounded-2xl border p-4 shadow-sm lg:grid-cols-[auto_minmax(0,1fr)_auto] lg:items-center ${
+                                        inactive
+                                            ? 'border-slate-200 bg-slate-100/80 opacity-75'
+                                            : actionable
+                                              ? 'border-amber-200 bg-amber-50/40'
+                                              : 'border-slate-200 bg-slate-50'
+                                    }`}
                                 >
+                                    <div className={`flex h-11 w-11 items-center justify-center rounded-2xl ${
+                                        inactive
+                                            ? 'bg-slate-200 text-slate-500'
+                                            : actionable
+                                              ? 'bg-amber-100 text-amber-700'
+                                              : 'bg-emerald-100 text-emerald-700'
+                                    }`}>
+                                        {actionable ? <Clock3 className="h-5 w-5" /> : assignment.signerStatus === 'SIGNED' ? <CheckCircle2 className="h-5 w-5" /> : <FileText className="h-5 w-5" />}
+                                    </div>
+
                                     <div className="min-w-0 space-y-2">
                                         <div className="flex flex-wrap items-center gap-2">
                                             <h3 className="truncate text-sm font-semibold text-slate-900">
-                                                {assignment.document.originalFileName ?? assignment.document.id}
+                                                {getAssignmentTitle(assignment)}
                                             </h3>
-                                            <Badge variant={assignment.signerStatus === 'PENDING' ? 'warning' : 'success'}>{assignment.signerStatus}</Badge>
+                                            <Badge variant={actionable ? 'warning' : assignment.signerStatus === 'SIGNED' ? 'success' : 'neutral'}>
+                                                {getSignerStatusLabel(assignment.signerStatus)}
+                                            </Badge>
+                                            {inactive ? (
+                                                <Badge variant={assignment.document.status === 'REVOKED' ? 'destructive' : 'neutral'}>
+                                                    {getDocumentStatusLabel(assignment.document.status)}
+                                                </Badge>
+                                            ) : null}
                                         </div>
-                                        <p className="text-xs text-slate-600">
-                                            Owner: {assignment.document.ownerDisplayName ?? assignment.document.ownerEmail ?? '-'}
-                                        </p>
-                                        <p className="text-xs text-slate-600">
-                                            Urutan: {assignment.order ?? '-'} | Status dokumen: {assignment.document.status}
-                                        </p>
+                                        <div className="grid gap-1 text-xs text-slate-600 sm:grid-cols-3">
+                                            <p><span className="font-semibold text-slate-700">Pemilik:</span> {assignment.document.ownerDisplayName ?? assignment.document.ownerEmail ?? '-'}</p>
+                                            <p><span className="font-semibold text-slate-700">Urutan:</span> {assignment.order ?? '-'}</p>
+                                            <p><span className="font-semibold text-slate-700">Dokumen:</span> {getDocumentStatusLabel(assignment.document.status)}</p>
+                                        </div>
+                                        {inactive ? (
+                                            <p className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-600">
+                                                Dokumen ini sudah {getDocumentStatusLabel(assignment.document.status).toLowerCase()}, sehingga tidak perlu ditandatangani lagi.
+                                            </p>
+                                        ) : null}
                                     </div>
 
-                                    <div className="flex flex-wrap gap-2">
-                                        <Button variant="outline" className="border-slate-300" onClick={() => openPreview(assignment)}>
-                                            <ExternalLink className="mr-2 h-4 w-4" />
-                                            Preview
+                                    <div className="flex flex-wrap justify-start gap-2 lg:justify-end">
+                                        <Button variant="outline" className="h-10 rounded-xl border-slate-300 bg-white font-semibold" onClick={() => openPreview(assignment)}>
+                                            <Eye className="mr-2 h-4 w-4" />
+                                            Lihat
                                         </Button>
                                         <Button
+                                            className="h-10 rounded-xl bg-blue-600 font-semibold text-white hover:bg-blue-700"
                                             onClick={() => handleAssignedSign(assignment.document.id)}
-                                            disabled={loadingAction !== '' || assignment.signerStatus !== 'PENDING'}
+                                            disabled={loadingAction !== '' || !actionable}
                                         >
                                             {loadingAction === 'Sign Dokumen' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PenLine className="mr-2 h-4 w-4" />}
-                                            Sign Sekarang
+                                            Tanda Tangani
                                         </Button>
                                         <Button
                                             variant="destructive"
+                                            className="h-10 rounded-xl font-semibold"
                                             onClick={() => openDeclineDialog(assignment)}
-                                            disabled={loadingAction !== '' || assignment.signerStatus !== 'PENDING'}
+                                            disabled={loadingAction !== '' || !actionable}
                                         >
                                             <XCircle className="mr-2 h-4 w-4" />
                                             Tolak
                                         </Button>
                                     </div>
                                 </div>
-                            ))
+                            );
+                            })
                         )}
 
                         {assignments.length > ASSIGNMENTS_PER_PAGE ? (
@@ -341,18 +458,18 @@ export default function CertificationAssignedDocumentsPage() {
                                 <div className="flex items-center gap-2">
                                     <Button
                                         variant="outline"
-                                        className="border-slate-300"
+                                        className="rounded-xl border-slate-300 bg-white"
                                         onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
                                         disabled={currentPage === 1}
                                     >
                                         Previous
                                     </Button>
-                                    <span className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700">
+                                    <span className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700">
                                         {currentPage} / {totalPages}
                                     </span>
                                     <Button
                                         variant="outline"
-                                        className="border-slate-300"
+                                        className="rounded-xl border-slate-300 bg-white"
                                         onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
                                         disabled={currentPage === totalPages}
                                     >
@@ -363,13 +480,6 @@ export default function CertificationAssignedDocumentsPage() {
                         ) : null}
                     </CardContent>
                 </Card>
-
-                <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" className="border-slate-300" onClick={() => router.push('/certification/review')}>
-                        <PlayCircle className="mr-2 h-4 w-4" />
-                        Kembali ke Review
-                    </Button>
-                </div>
             </div>
 
             <Dialog open={Boolean(previewState)} onOpenChange={(open) => !open && closePreview()}>

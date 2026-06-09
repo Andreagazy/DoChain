@@ -8,10 +8,14 @@ import { CreateAdminUserDto, UpdateAdminUserDto } from './dto/update-admin-user.
 import { CreateAcademicUnitDto, UpdateAcademicUnitDto } from './dto/manage-academic-unit.dto';
 import { RevokeDocumentDto } from './dto/revoke-document.dto';
 import { ReviewIdentityDto } from '../identity/dto/review-identity.dto';
+import { BlockchainService } from '../blockchain/blockchain.service';
 
 @Injectable()
 export class AdminService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private blockchainService: BlockchainService,
+  ) {}
 
   async listUsers(requesterUserId?: string) {
     const scope = requesterUserId
@@ -39,6 +43,8 @@ export class AdminService {
       totalUsers,
       activeUsers,
       pendingIdentities,
+      pendingIdentityChanges,
+      pendingAcademicProfileChanges,
       totalDocuments,
       fullySignedDocuments,
       revokedDocuments,
@@ -49,6 +55,8 @@ export class AdminService {
       this.prisma.user.count({ where: userWhere }),
       this.prisma.user.count({ where: { ...userWhere, status: 'ACTIVE' } }),
       this.prisma.identity.count({ where: { ...identityWhere, status: 'PENDING' } }),
+      this.prisma.identityChangeRequest.count({ where: { ...identityWhere, status: 'PENDING' } }),
+      this.prisma.academicProfileChangeRequest.count({ where: { ...identityWhere, status: 'PENDING' } }),
       this.prisma.document.count({ where: documentWhere }),
       this.prisma.document.count({ where: { ...documentWhere, status: 'FULLY_SIGNED' } }),
       this.prisma.document.count({ where: { ...documentWhere, status: 'REVOKED' } }),
@@ -84,7 +92,8 @@ export class AdminService {
         })),
       },
       identities: {
-        pending: pendingIdentities,
+        pending: pendingIdentities + pendingIdentityChanges,
+        pendingAcademicProfileChanges,
       },
       documents: {
         total: totalDocuments,
@@ -423,6 +432,132 @@ export class AdminService {
     };
   }
 
+  async listAcademicProfileChangeRequests(requesterUserId: string) {
+    const scope = await this.getAccessScope(requesterUserId);
+
+    const requests = await this.prisma.academicProfileChangeRequest.findMany({
+      where: {
+        status: 'PENDING',
+        ...(scope.prodiIds ? { user: this.userScopeWhere(scope.prodiIds) } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        userId: true,
+        nim: true,
+        angkatan: true,
+        kelas: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        prodi: {
+          select: { id: true, code: true, name: true, type: true },
+        },
+        user: {
+          select: {
+            email: true,
+            displayName: true,
+            role: true,
+            identity: {
+              select: { fullName: true },
+            },
+            studentProfile: {
+              select: {
+                nim: true,
+                angkatan: true,
+                kelas: true,
+                prodi: { select: { id: true, code: true, name: true, type: true } },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    return { requests };
+  }
+
+  async reviewAcademicProfileChangeRequest(
+    reviewerUserId: string,
+    requestId: string,
+    dto: ReviewIdentityDto,
+  ) {
+    const request = await this.prisma.academicProfileChangeRequest.findUnique({
+      where: { id: requestId },
+      select: {
+        id: true,
+        userId: true,
+        nim: true,
+        prodiId: true,
+        angkatan: true,
+        kelas: true,
+        status: true,
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Request perubahan profil akademik tidak ditemukan');
+    }
+
+    await this.ensureCanAccessUser(reviewerUserId, request.userId);
+
+    if (request.status !== 'PENDING') {
+      throw new BadRequestException('Request perubahan profil akademik sudah diproses');
+    }
+
+    if (dto.status === 'APPROVED') {
+      await this.ensureUnit(request.prodiId, 'PRODI');
+
+      const existingNim = await this.prisma.studentProfile.findUnique({
+        where: { nim: request.nim },
+        select: { userId: true },
+      });
+
+      if (existingNim && existingNim.userId !== request.userId) {
+        throw new BadRequestException('NIM sudah digunakan oleh mahasiswa lain');
+      }
+
+      await this.prisma.$transaction(async (tx) => {
+        await tx.studentProfile.update({
+          where: { userId: request.userId },
+          data: {
+            nim: request.nim,
+            prodiId: request.prodiId,
+            angkatan: request.angkatan,
+            kelas: request.kelas,
+          },
+        });
+
+        await tx.academicProfileChangeRequest.update({
+          where: { id: request.id },
+          data: {
+            status: 'APPROVED',
+            reviewedById: reviewerUserId,
+            reviewedAt: new Date(),
+            rejectionReason: null,
+          },
+        });
+      });
+
+      return { message: 'Perubahan profil akademik berhasil di-approve' };
+    }
+
+    await this.prisma.academicProfileChangeRequest.update({
+      where: { id: request.id },
+      data: {
+        status: 'REJECTED',
+        reviewedById: reviewerUserId,
+        reviewedAt: new Date(),
+        rejectionReason:
+          dto.rejectionReason?.trim() || 'Data profil akademik tidak valid',
+      },
+    });
+
+    return {
+      message: `Perubahan profil akademik ditolak${dto.rejectionReason ? `: ${dto.rejectionReason}` : ''}`,
+    };
+  }
+
   async listAcademicUnits(requesterUserId?: string) {
     const scope = requesterUserId
       ? await this.getAccessScope(requesterUserId)
@@ -621,7 +756,7 @@ export class AdminService {
   ) {
     const document = await this.prisma.document.findUnique({
       where: { id: documentId },
-      select: { id: true, status: true },
+      select: { id: true, status: true, finalFileHash: true },
     });
 
     if (!document) {
@@ -631,6 +766,14 @@ export class AdminService {
     if (document.status === 'REVOKED') {
       throw new BadRequestException('Dokumen sudah berstatus REVOKED');
     }
+
+    if (!document.finalFileHash) {
+      throw new BadRequestException(
+        'Dokumen belum memiliki hash final sehingga belum bisa dicabut dari blockchain',
+      );
+    }
+
+    await this.blockchainService.revokeDocument(document.finalFileHash, dto.reason);
 
     const updated = await this.prisma.document.update({
       where: { id: documentId },
@@ -719,10 +862,25 @@ export class AdminService {
     });
 
     return {
-      fileName:
-        document.finalFileName ?? document.originalFileName ?? `${document.id}.pdf`,
+      fileName: this.buildSignedPdfFileName(document.originalFileName),
       content: readFileSync(path),
     };
+  }
+
+  private buildSignedPdfFileName(originalFileName: string | null) {
+    const fallbackName = 'dokumen';
+    const baseName = (originalFileName ?? fallbackName)
+      .replace(/\.pdf$/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const safeBaseName =
+      baseName
+        .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+        .replace(/\.+$/g, '')
+        .replace(/-+/g, '-')
+        .trim() || fallbackName;
+
+    return `${safeBaseName}-signed.pdf`;
   }
 
   private async ensureUnit(unitId: string, type?: 'JURUSAN' | 'PRODI') {

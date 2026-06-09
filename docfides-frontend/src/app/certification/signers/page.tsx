@@ -12,6 +12,7 @@ import { AppShell } from '@/components/layout/app-shell';
 import { CertificationStepper } from '@/components/certification/certification-stepper';
 import {
     getDocumentSignerPlaceholders,
+    getIdentityProfile,
     getIdentityStatus,
     getSignatureStatus,
     getUser,
@@ -32,6 +33,9 @@ const SIGNER_ROLE_RANK: Record<string, number> = {
     SUPERADMIN: 60,
 };
 
+const getSignerDisplayName = (signer?: Pick<SignerCandidate, 'certificateName' | 'fullName' | 'displayName' | 'email'> | null) =>
+    signer?.certificateName ?? signer?.fullName ?? signer?.displayName ?? signer?.email ?? 'Signer';
+
 function CertificationSignersContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -42,6 +46,7 @@ function CertificationSignersContent() {
     const [success, setSuccess] = useState('');
 
     const [currentUser, setCurrentUser] = useState<User | null>(null);
+    const [currentUserFullName, setCurrentUserFullName] = useState<string | null>(null);
     const [preferredMode, setPreferredMode] = useState<'visible' | 'invisible'>('invisible');
     const [hasSignature, setHasSignature] = useState(false);
     const [myDocuments, setMyDocuments] = useState<OwnedDocumentItem[]>([]);
@@ -62,9 +67,10 @@ function CertificationSignersContent() {
             options.unshift({
                 id: currentUser.id,
                 email: currentUser.email,
-                displayName: `${currentUser.displayName ?? 'Saya'} (Owner Dokumen)`,
+                displayName: currentUser.displayName ?? 'Saya',
+                fullName: currentUserFullName,
+                certificateName: `${currentUserFullName ?? currentUser.displayName ?? 'Saya'} (Pemilik Dokumen)`,
                 role: currentUser.role,
-                signerLevel: SIGNER_ROLE_RANK[currentUser.role] ?? 999,
                 academicProfile: currentUser.academicProfile ?? null,
                 preferredSignatureMode: preferredMode,
             });
@@ -73,11 +79,11 @@ function CertificationSignersContent() {
         const uniqueOptions = Array.from(new Map(options.map((item) => [item.id, item])).values());
 
         return uniqueOptions.sort((a, b) => {
-            const levelA = a.signerLevel ?? SIGNER_ROLE_RANK[a.role] ?? 999;
-            const levelB = b.signerLevel ?? SIGNER_ROLE_RANK[b.role] ?? 999;
-            return levelA - levelB || (a.displayName ?? a.email).localeCompare(b.displayName ?? b.email);
+            const levelA = SIGNER_ROLE_RANK[a.role] ?? 999;
+            const levelB = SIGNER_ROLE_RANK[b.role] ?? 999;
+            return levelA - levelB || getSignerDisplayName(a).localeCompare(getSignerDisplayName(b));
         });
-    }, [currentUser, preferredMode, signerCandidates]);
+    }, [currentUser, currentUserFullName, preferredMode, signerCandidates]);
 
     const signerPreferenceById = useMemo(
         () => new Map(signerOptions.map((item) => [item.id, item.preferredSignatureMode])),
@@ -91,7 +97,7 @@ function CertificationSignersContent() {
 
     const getSignerLevel = (signerId: string) => {
         const signer = signerById.get(signerId);
-        return signer?.signerLevel ?? SIGNER_ROLE_RANK[signer?.role ?? ''] ?? 999;
+        return SIGNER_ROLE_RANK[signer?.role ?? ''] ?? 999;
     };
 
     const normalizeSignerOrder = (signerIds: string[]) => {
@@ -122,7 +128,7 @@ function CertificationSignersContent() {
                 return true;
             }
 
-            const label = (option.displayName ?? option.email).toLowerCase();
+            const label = getSignerDisplayName(option).toLowerCase();
             return label.includes(term) || option.email.toLowerCase().includes(term);
         });
     }, [orderedSignerIds, signerOptions, signerSearch]);
@@ -147,20 +153,22 @@ function CertificationSignersContent() {
             try {
                 setCurrentUser(getUser());
 
-                const [identityStatus, signatureStatus, documents, candidates] = await Promise.all([
+                const [identityStatus, identityProfile, signatureStatus, documents, candidates] = await Promise.all([
                     getIdentityStatus(),
+                    getIdentityProfile(),
                     getSignatureStatus(),
                     listMyCertificationDocuments(),
                     listSignerCandidates(),
                 ]);
 
                 if (identityStatus.status !== 'APPROVED') {
-                    router.push('/identity');
+                    router.push('/profile#identitas-ktp');
                     return;
                 }
 
                 setPreferredMode(signatureStatus.preferredSignatureMode);
                 setHasSignature(signatureStatus.hasSignature);
+                setCurrentUserFullName(identityProfile.fullName ?? null);
                 setMyDocuments(documents.documents);
                 setSignerCandidates(candidates.signers);
 
@@ -314,7 +322,7 @@ function CertificationSignersContent() {
     }
 
     return (
-        <AppShell title="Certification - Signers" subtitle="Langkah kedua: tentukan urutan signer sebelum placeholder ditempatkan.">
+        <AppShell title="Sertifikasi - Signer" subtitle="Langkah kedua: tentukan urutan penandatangan dokumen.">
             <div className="space-y-6">
                 <CertificationStepper currentStep="signers" documentId={selectedDocumentId} />
 
@@ -330,7 +338,15 @@ function CertificationSignersContent() {
                     </Alert>
                 ) : null}
 
-                <Card className="border-slate-200 bg-white/90 shadow-sm">
+                <section className="rounded-2xl border border-blue-100 bg-blue-50 p-6 shadow-sm">
+                    <Badge className="rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-bold uppercase tracking-wide text-blue-700 hover:bg-white">Pilih Signer</Badge>
+                    <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-950 md:text-3xl">Susun penandatangan sesuai alur akademik.</h1>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                        Signer akan diurutkan dari level terendah ke tertinggi. Role setara tetap bisa ditukar urutannya.
+                    </p>
+                </section>
+
+                <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
                     <CardHeader>
                         <CardTitle>Dokumen Terpilih</CardTitle>
                         <CardDescription>
@@ -341,7 +357,6 @@ function CertificationSignersContent() {
                         {selectedDocument ? (
                             <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
                                 <p className="font-semibold text-slate-900">{selectedDocument.originalFileName ?? selectedDocument.id}</p>
-                                <p className="mt-1 text-xs text-slate-500">ID: {selectedDocument.id}</p>
                                 <p className="mt-1 text-xs text-slate-500">Status: {selectedDocument.status}</p>
                             </div>
                         ) : (
@@ -350,10 +365,10 @@ function CertificationSignersContent() {
                     </CardContent>
                 </Card>
 
-                <Card className="border-slate-200 bg-white/90 shadow-sm">
+                <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
                     <CardHeader>
                         <CardTitle>Tambahkan Signer</CardTitle>
-                        <CardDescription>Signer otomatis disusun dari level terendah ke tertinggi: mahasiswa, pegawai/dosen, admin prodi, kaprodi, lalu kajur. Urutan hanya bisa ditukar untuk role yang setara.</CardDescription>
+                        <CardDescription>Signer otomatis disusun mengikuti alur kampus: mahasiswa, pegawai/dosen, admin prodi, kaprodi, lalu kajur. Urutan hanya bisa ditukar untuk role yang setara.</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
                         <Input
@@ -369,13 +384,10 @@ function CertificationSignersContent() {
                                 availableSignerOptions.map((signer) => (
                                     <div key={signer.id} className="flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 last:border-b-0">
                                         <div className="min-w-0">
-                                            <p className="truncate text-sm font-medium text-slate-900">{signer.displayName ?? signer.email}</p>
+                                            <p className="truncate text-sm font-medium text-slate-900">{getSignerDisplayName(signer)}</p>
                                             <p className="truncate text-xs text-slate-500">{signer.email}</p>
                                             <p className="truncate text-xs text-slate-500">
                                                 {signer.academicProfile?.label ?? signer.academicProfile?.unitName ?? signer.role}
-                                            </p>
-                                            <p className="truncate text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                                                Level signer: {signer.signerLevel}
                                             </p>
                                         </div>
                                         <Button variant="outline" className="border-slate-300" onClick={() => addSigner(signer.id)}>
@@ -389,7 +401,7 @@ function CertificationSignersContent() {
                     </CardContent>
                 </Card>
 
-                <Card className="border-slate-200 bg-white/90 shadow-sm">
+                <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
                     <CardHeader>
                         <CardTitle>Urutan Signer</CardTitle>
                         <CardDescription>
@@ -404,15 +416,14 @@ function CertificationSignersContent() {
                                 const signer = signerById.get(signerId);
                                 const isVisibleSigner = signerPreferenceById.get(signerId) === 'visible';
                                 const placeholder = placeholderBySignerId[signerId];
-                                const signerLevel = getSignerLevel(signerId);
                                 const canMoveUp = canMoveSigner(index, -1);
                                 const canMoveDown = canMoveSigner(index, 1);
 
                                 return (
-                                    <div key={signerId} className="flex flex-col gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 md:flex-row md:items-center md:justify-between">
+                                    <div key={signerId} className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 md:flex-row md:items-center md:justify-between">
                                         <div className="space-y-2">
                                             <p className="text-sm text-slate-800">
-                                                Urutan {index + 1}: <span className="font-semibold">{signer?.displayName ?? signer?.email ?? signerId}</span>
+                                                Urutan {index + 1}: <span className="font-semibold">{getSignerDisplayName(signer)}</span>
                                             </p>
                                             {signer?.academicProfile ? (
                                                 <p className="text-xs text-slate-600">
@@ -423,7 +434,7 @@ function CertificationSignersContent() {
                                                 Mode: {isVisibleSigner ? 'Visible' : 'Invisible'}{isVisibleSigner ? `. Placeholder ${placeholder ? `sudah diatur di page ${placeholder.visiblePage}` : 'belum ditentukan'}` : '. Tidak perlu placeholder.'}
                                             </p>
                                             <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                                                Role: {signer?.role ?? '-'} | Level: {signerLevel}
+                                                Role: {signer?.role ?? '-'}
                                             </p>
                                         </div>
                                         <div className="flex flex-wrap gap-2">
@@ -449,11 +460,11 @@ function CertificationSignersContent() {
                 </Card>
 
                 <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" className="border-slate-300" onClick={() => router.push(buildCertificationStepHref('upload'))}>
+                    <Button variant="outline" className="rounded-xl border-slate-300 bg-white" onClick={() => router.push(buildCertificationStepHref('upload'))}>
                         <ArrowLeft className="mr-2 h-4 w-4" />
                         Kembali ke Upload
                     </Button>
-                    <Button onClick={handleContinue} disabled={loadingAction !== '' || orderedSignerIds.length === 0}>
+                    <Button className="rounded-xl bg-blue-600 font-semibold text-white hover:bg-blue-700" onClick={handleContinue} disabled={loadingAction !== '' || orderedSignerIds.length === 0}>
                         {loadingAction === 'Simpan Signer' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                         Simpan dan Lanjut ke Placeholder
                         <ArrowRight className="ml-2 h-4 w-4" />

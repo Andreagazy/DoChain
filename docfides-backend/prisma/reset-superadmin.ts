@@ -4,7 +4,7 @@ import { Pool } from 'pg';
 import { PrismaClient } from '../generated/prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 
-const email = process.env.RESET_SUPERADMIN_EMAIL ?? 'superadmin@dochain.local';
+const email = process.env.RESET_SUPERADMIN_EMAIL ?? 'superadmin@docchain.local';
 const password = process.env.RESET_SUPERADMIN_PASSWORD ?? 'Superadmin123!';
 
 async function main() {

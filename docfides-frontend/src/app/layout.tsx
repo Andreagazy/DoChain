@@ -8,7 +8,7 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "DoChain - Blockchain Document Certification",
+  title: "DOCChain - Blockchain Document Certification",
   description: "Secure, decentralized, and seamless digital document certification powered by blockchain.",
 };
 

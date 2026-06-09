@@ -52,7 +52,7 @@ export class IdentityController {
         filename: (req, file, cb) => {
           const request = req as RequestWithUser;
           const extension = extname(file.originalname).toLowerCase() || '.jpg';
-          cb(null, `${request.user.userId}-ktp${extension}`);
+          cb(null, `${request.user.userId}-ktp-${Date.now()}${extension}`);
         },
       }),
       fileFilter: (_req, file, cb) => {
@@ -109,6 +109,44 @@ export class IdentityController {
     @Body() dto: ReviewIdentityDto,
   ) {
     return this.identityService.reviewIdentity(req.user.userId, userId, dto);
+  }
+
+  @Get('change-requests/pending')
+  @UseGuards(RolesGuard)
+  @Roles('SUPERADMIN', 'ADMIN_PRODI')
+  async listPendingIdentityChangeRequests(@Req() req: RequestWithUser) {
+    return this.identityService.listPendingIdentityChangeRequests(req.user.userId);
+  }
+
+  @Patch('change-requests/:requestId/review')
+  @UseGuards(RolesGuard)
+  @Roles('SUPERADMIN', 'ADMIN_PRODI')
+  async reviewIdentityChangeRequest(
+    @Req() req: RequestWithUser,
+    @Param('requestId') requestId: string,
+    @Body() dto: ReviewIdentityDto,
+  ) {
+    return this.identityService.reviewIdentityChangeRequest(
+      req.user.userId,
+      requestId,
+      dto,
+    );
+  }
+
+  @Get('change-requests/:requestId/ktp')
+  @UseGuards(RolesGuard)
+  @Roles('SUPERADMIN', 'ADMIN_PRODI')
+  async getIdentityChangeRequestKtp(
+    @Req() req: RequestWithUser,
+    @Param('requestId') requestId: string,
+    @Res() res: Response,
+  ) {
+    const path =
+      await this.identityService.resolveIdentityChangeRequestKtpPathForReviewer(
+        req.user.userId,
+        requestId,
+      );
+    return res.sendFile(path);
   }
 
   @Get(':userId/ktp')

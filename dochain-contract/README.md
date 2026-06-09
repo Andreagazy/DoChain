@@ -1,4 +1,4 @@
-# DoChain Contract
+# DOCChain Contract
 
 Hardhat project untuk deploy contract pencatatan hash dokumen ke private Ethereum Hyperledger Besu.
 

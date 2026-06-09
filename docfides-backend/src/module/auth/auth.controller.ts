@@ -18,6 +18,7 @@ import { RegisterDto } from './dto/register.dto';
 import { JwtAuthGuard } from './guard/jwt.guard';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { RequestAcademicProfileChangeDto } from './dto/academic-profile-change.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -50,6 +51,15 @@ export class AuthController {
     @Body() dto: ChangePasswordDto,
   ) {
     return this.authService.changePassword(req.user.userId, dto);
+  }
+
+  @Post('academic-profile/change-request')
+  @UseGuards(JwtAuthGuard)
+  async requestAcademicProfileChange(
+    @Req() req: Request & { user: { userId: string } },
+    @Body() dto: RequestAcademicProfileChangeDto,
+  ) {
+    return this.authService.requestAcademicProfileChange(req.user.userId, dto);
   }
 
   @Post('login')

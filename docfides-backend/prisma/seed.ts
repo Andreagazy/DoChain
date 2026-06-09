@@ -11,49 +11,49 @@ const prisma = new PrismaClient({ adapter });
 
 const seededUsers = [
   {
-    email: 'superadmin@dochain.local',
+    email: 'superadmin@docchain.local',
     password: 'Superadmin123!',
     role: 'SUPERADMIN',
-    displayName: 'Superadmin DoChain',
+    displayName: 'Superadmin DOCChain',
   },
   {
-    email: 'kajur@dochain.local',
+    email: 'kajur@docchain.local',
     password: 'Jurusan123!',
     role: 'JURUSAN',
     displayName: 'Ketua Jurusan',
   },
   {
-    email: 'kaprodi@dochain.local',
+    email: 'kaprodi@docchain.local',
     password: 'Prodi123!',
     role: 'PRODI',
     displayName: 'Ketua Program Studi Informatika',
   },
   {
-    email: 'kaprodi-si@dochain.local',
+    email: 'kaprodi-si@docchain.local',
     password: 'ProdiSi123!',
     role: 'PRODI',
     displayName: 'Ketua Program Studi Sistem Informasi',
   },
   {
-    email: 'admin-prodi-a@dochain.local',
+    email: 'admin-prodi-a@docchain.local',
     password: 'AdminProdiA123!',
     role: 'ADMIN_PRODI',
     displayName: 'Admin Prodi A',
   },
   {
-    email: 'admin-prodi-b@dochain.local',
+    email: 'admin-prodi-b@docchain.local',
     password: 'AdminProdiB123!',
     role: 'ADMIN_PRODI',
     displayName: 'Admin Prodi B',
   },
   {
-    email: 'pegawai@dochain.local',
-    password: 'Pegawai123!',
+    email: 'dosen@docchain.local',
+    password: 'Dosen123!',
     role: 'PEGAWAI',
-    displayName: 'Pegawai/Dosen',
+    displayName: 'Dosen',
   },
   {
-    email: 'mahasiswa@dochain.local',
+    email: 'mahasiswa@docchain.local',
     password: 'Mahasiswa123!',
     role: 'MAHASISWA',
     displayName: 'Mahasiswa',
@@ -114,6 +114,25 @@ async function main() {
 
   const savedByEmail = new Map<string, { id: string; email: string; role: string }>();
 
+  const legacyPegawai = await prisma.user.findUnique({
+    where: { email: 'pegawai@docchain.local' },
+    select: { id: true },
+  });
+  const existingDosen = await prisma.user.findUnique({
+    where: { email: 'dosen@docchain.local' },
+    select: { id: true },
+  });
+
+  if (legacyPegawai && !existingDosen) {
+    await prisma.user.update({
+      where: { email: 'pegawai@docchain.local' },
+      data: {
+        email: 'dosen@docchain.local',
+        displayName: 'Dosen',
+      },
+    });
+  }
+
   for (const user of seededUsers) {
     const passwordHash = await hash(user.password, 10);
     const saved = await prisma.user.upsert({
@@ -143,14 +162,14 @@ async function main() {
     savedByEmail.set(saved.email, saved);
   }
 
-  const superadmin = savedByEmail.get('superadmin@dochain.local');
-  const kajur = savedByEmail.get('kajur@dochain.local');
-  const kaprodi = savedByEmail.get('kaprodi@dochain.local');
-  const kaprodiSi = savedByEmail.get('kaprodi-si@dochain.local');
-  const adminProdiA = savedByEmail.get('admin-prodi-a@dochain.local');
-  const adminProdiB = savedByEmail.get('admin-prodi-b@dochain.local');
-  const pegawai = savedByEmail.get('pegawai@dochain.local');
-  const mahasiswa = savedByEmail.get('mahasiswa@dochain.local');
+  const superadmin = savedByEmail.get('superadmin@docchain.local');
+  const kajur = savedByEmail.get('kajur@docchain.local');
+  const kaprodi = savedByEmail.get('kaprodi@docchain.local');
+  const kaprodiSi = savedByEmail.get('kaprodi-si@docchain.local');
+  const adminProdiA = savedByEmail.get('admin-prodi-a@docchain.local');
+  const adminProdiB = savedByEmail.get('admin-prodi-b@docchain.local');
+  const dosen = savedByEmail.get('dosen@docchain.local');
+  const mahasiswa = savedByEmail.get('mahasiswa@docchain.local');
 
   for (const item of [
     {
@@ -204,7 +223,7 @@ async function main() {
       assignmentPosition: 'ADMIN_PRODI',
     },
     {
-      user: pegawai,
+      user: dosen,
       nip: '198501012010031001',
       nidn: '0001018501',
       employeeType: 'DOSEN',

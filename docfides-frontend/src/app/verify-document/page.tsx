@@ -71,13 +71,33 @@ type DbMatchResult = {
 };
 
 type InspectResult = {
-    overallStatus: 'VALID' | 'MODIFIED' | 'NO_SIGNATURES' | 'PARTIAL';
+    overallStatus: 'VALID' | 'MODIFIED' | 'NO_SIGNATURES' | 'PARTIAL' | 'NOT_RECORDED' | 'REVOKED';
     overallMessage: string;
     fileHash: string;
     fileSize: number;
     signatureCount: number;
     signatures: SignatureDetail[];
     dbMatch: DbMatchResult;
+    blockchain: BlockchainRecord | null;
+    verification: {
+        hashMatchesBlockchain: boolean;
+        registeredOnBlockchain: boolean;
+        revokedOnBlockchain: boolean;
+        verified: boolean;
+        message: string;
+    };
+};
+
+type BlockchainRecord = {
+    documentHash: string;
+    ipfsCid: string;
+    issuer: string;
+    issuedAt: string | null;
+    revoked: boolean;
+    revokedAt: string | null;
+    revokeReasonHash: string | null;
+    exists: boolean;
+    contractAddress: string;
 };
 
 /* ─── Helpers ──────────────────────────────────────────────────────── */
@@ -100,6 +120,27 @@ function formatFileSize(bytes: number) {
 
 function formatFingerprint(fp: string) {
     return fp.match(/.{1,2}/g)?.join(':') ?? fp;
+}
+
+function formatDocumentStatus(status: string | null) {
+    const map: Record<string, string> = {
+        DRAFT: 'Draft',
+        WAITING_SIGNATURES: 'Menunggu tanda tangan',
+        IN_PROGRESS: 'Dalam proses tanda tangan',
+        FULLY_SIGNED: 'Final dan aktif',
+        REJECTED: 'Ditolak',
+        REVOKED: 'Dicabut',
+    };
+
+    return status ? map[status] ?? status : '-';
+}
+
+function HashValue({ value }: { value: string | null | undefined }) {
+    if (!value) {
+        return <span className="text-slate-400">-</span>;
+    }
+
+    return <span className="break-all font-mono text-xs text-slate-700">{value}</span>;
 }
 
 /* ─── Sub-components ─────────────────────────────────────────────── */
@@ -131,18 +172,18 @@ function DropZone({
             onDragLeave={() => setDragging(false)}
             onDrop={handleDrop}
             onClick={() => !loading && inputRef.current?.click()}
-            className={`group relative flex flex-col items-center justify-center gap-5 rounded-2xl border-2 border-dashed p-14 cursor-pointer transition-all duration-300
+            className={`group relative flex cursor-pointer flex-col items-center justify-center gap-5 rounded-lg border-2 border-dashed p-8 text-center transition-all duration-300 md:p-12
                 ${dragging
-                    ? 'border-indigo-500 bg-indigo-50/60 scale-[1.01]'
-                    : 'border-slate-200 bg-white hover:border-indigo-400 hover:bg-indigo-50/30'
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-slate-300 bg-white hover:border-blue-400 hover:bg-blue-50/40'
                 }
                 ${loading ? 'pointer-events-none opacity-60' : ''}
             `}
-            style={{ minHeight: 280 }}
+            style={{ minHeight: 300 }}
         >
             {/* Glow ring on drag */}
             {dragging && (
-                <div className="pointer-events-none absolute inset-0 rounded-2xl ring-4 ring-indigo-300/40" />
+                <div className="pointer-events-none absolute inset-0 rounded-lg ring-4 ring-blue-200/70" />
             )}
 
             <input
@@ -155,19 +196,19 @@ function DropZone({
 
             {loading ? (
                 <>
-                    <div className="flex h-16 w-16 items-center justify-center rounded-full bg-indigo-100">
-                        <Loader2 className="h-8 w-8 animate-spin text-indigo-600" />
+                    <div className="flex h-16 w-16 items-center justify-center rounded-lg bg-blue-100">
+                        <Loader2 className="h-8 w-8 animate-spin text-blue-700" />
                     </div>
                     <p className="text-sm font-semibold text-slate-600 animate-pulse">
-                        Menganalisis tanda tangan digital…
+                        Menganalisis tanda tangan digital...
                     </p>
                 </>
             ) : (
                 <>
-                    <div className={`flex h-20 w-20 items-center justify-center rounded-full transition-all duration-300
-                        ${dragging ? 'bg-indigo-500 scale-110' : 'bg-gradient-to-br from-indigo-100 to-violet-100 group-hover:scale-105'}
+                    <div className={`flex h-20 w-20 items-center justify-center rounded-lg transition-all duration-300
+                        ${dragging ? 'scale-105 bg-blue-600' : 'bg-blue-100 group-hover:bg-blue-200'}
                     `}>
-                        <UploadCloud className={`h-9 w-9 transition-colors ${dragging ? 'text-white' : 'text-indigo-600'}`} />
+                        <UploadCloud className={`h-9 w-9 transition-colors ${dragging ? 'text-white' : 'text-blue-700'}`} />
                     </div>
 
                     <div className="text-center">
@@ -175,16 +216,16 @@ function DropZone({
                             {dragging ? 'Lepaskan untuk memulai verifikasi' : 'Seret & lepas file PDF di sini'}
                         </p>
                         <p className="mt-1 text-sm text-slate-500">
-                            atau <span className="font-semibold text-indigo-600 hover:underline">klik untuk memilih file</span>
+                            atau <span className="font-semibold text-blue-700 hover:underline">klik untuk memilih file</span>
                         </p>
                         <p className="mt-3 text-xs text-slate-400">
-                            Hanya file PDF · Maksimal 50 MB · File tidak disimpan di server
+                            Hanya file PDF - Maksimal 50 MB - File tidak disimpan di server
                         </p>
                     </div>
 
-                    <div className="flex items-center gap-6 mt-2">
+                    <div className="mt-2 grid gap-2 text-left sm:grid-cols-3">
                         {['Tanda Tangan Digital', 'Rantai Sertifikat', 'Integritas Dokumen'].map((label) => (
-                            <div key={label} className="flex items-center gap-1.5 text-xs text-slate-500">
+                            <div key={label} className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
                                 <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
                                 <span>{label}</span>
                             </div>
@@ -429,8 +470,8 @@ function OverallStatusBanner({ result }: { result: InspectResult }) {
             icon: ShieldCheck,
             title: 'Dokumen Valid & Terverifikasi',
             subtitle: result.overallMessage,
-            bg: 'from-emerald-50 to-teal-50 border-emerald-200',
-            iconBg: 'bg-emerald-100 ring-emerald-50',
+            bg: 'border-emerald-200 bg-emerald-50',
+            iconBg: 'bg-emerald-100',
             iconColor: 'text-emerald-600',
             titleColor: 'text-emerald-900',
         },
@@ -438,8 +479,8 @@ function OverallStatusBanner({ result }: { result: InspectResult }) {
             icon: ShieldX,
             title: 'Dokumen Telah Dimodifikasi',
             subtitle: result.overallMessage,
-            bg: 'from-red-50 to-rose-50 border-red-200',
-            iconBg: 'bg-red-100 ring-red-50',
+            bg: 'border-red-200 bg-red-50',
+            iconBg: 'bg-red-100',
             iconColor: 'text-red-600',
             titleColor: 'text-red-900',
         },
@@ -447,8 +488,8 @@ function OverallStatusBanner({ result }: { result: InspectResult }) {
             icon: ShieldAlert,
             title: 'Tidak Ada Tanda Tangan Digital',
             subtitle: result.overallMessage,
-            bg: 'from-amber-50 to-yellow-50 border-amber-200',
-            iconBg: 'bg-amber-100 ring-amber-50',
+            bg: 'border-amber-200 bg-amber-50',
+            iconBg: 'bg-amber-100',
             iconColor: 'text-amber-600',
             titleColor: 'text-amber-900',
         },
@@ -456,28 +497,51 @@ function OverallStatusBanner({ result }: { result: InspectResult }) {
             icon: ShieldAlert,
             title: 'Verifikasi Sebagian',
             subtitle: result.overallMessage,
-            bg: 'from-amber-50 to-orange-50 border-amber-200',
-            iconBg: 'bg-amber-100 ring-amber-50',
+            bg: 'border-amber-200 bg-amber-50',
+            iconBg: 'bg-amber-100',
             iconColor: 'text-amber-600',
             titleColor: 'text-amber-900',
+        },
+        NOT_RECORDED: {
+            icon: ShieldAlert,
+            title: 'Tidak Terdaftar di Blockchain',
+            subtitle: result.overallMessage,
+            bg: 'border-slate-200 bg-white',
+            iconBg: 'bg-slate-100',
+            iconColor: 'text-slate-600',
+            titleColor: 'text-slate-900',
+        },
+        REVOKED: {
+            icon: ShieldX,
+            title: 'Dokumen Sudah Dicabut',
+            subtitle: result.overallMessage,
+            bg: 'border-red-200 bg-red-50',
+            iconBg: 'bg-red-100',
+            iconColor: 'text-red-600',
+            titleColor: 'text-red-900',
         },
     }[result.overallStatus];
 
     const Icon = config.icon;
 
     return (
-        <div className={`flex flex-col items-center gap-4 rounded-2xl border bg-gradient-to-br ${config.bg} p-8 text-center shadow-sm`}>
-            <div className={`flex h-20 w-20 items-center justify-center rounded-full ${config.iconBg} ring-8`}>
-                <Icon className={`h-10 w-10 ${config.iconColor}`} strokeWidth={1.5} />
+        <div className={`flex flex-col gap-5 rounded-lg border ${config.bg} p-6 shadow-sm md:flex-row md:items-center md:justify-between`}>
+            <div className="flex items-start gap-4">
+            <div className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-lg ${config.iconBg}`}>
+                <Icon className={`h-8 w-8 ${config.iconColor}`} strokeWidth={1.8} />
             </div>
             <div>
-                <p className="text-xs font-semibold uppercase tracking-widest text-slate-500">
-                    Hasil Verifikasi Tanda Tangan Digital
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Hasil Verifikasi File
                 </p>
-                <h1 className={`mt-1 text-2xl font-extrabold tracking-tight ${config.titleColor}`}>
+                <h1 className={`mt-1 text-2xl font-bold tracking-tight ${config.titleColor}`}>
                     {config.title}
                 </h1>
-                <p className="mt-2 text-sm text-slate-600 max-w-md mx-auto">{config.subtitle}</p>
+                <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">{config.subtitle}</p>
+            </div>
+            </div>
+            <div className={`w-fit rounded-full border px-3 py-1 text-xs font-bold ${result.verification.verified ? 'border-emerald-200 bg-white text-emerald-700' : 'border-slate-200 bg-white text-slate-600'}`}>
+                {result.verification.verified ? 'VERIFIED' : 'NOT VERIFIED'}
             </div>
         </div>
     );
@@ -491,7 +555,7 @@ function DbMatchCard({ match }: { match: DbMatchResult }) {
             <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                 <Database className="h-5 w-5 shrink-0 text-slate-400" />
                 <div>
-                    <p className="text-sm font-semibold text-slate-700">Tidak ditemukan di database DoChain</p>
+                    <p className="text-sm font-semibold text-slate-700">Tidak ditemukan di database DOCChain</p>
                     <p className="text-xs text-slate-500">
                         Dokumen ini tidak terdaftar dalam sistem — mungkin ditandatangani oleh sistem lain.
                     </p>
@@ -512,9 +576,9 @@ function DbMatchCard({ match }: { match: DbMatchResult }) {
                 <Database className="h-5 w-5 shrink-0 text-indigo-500 mt-0.5" />
                 <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-sm font-bold text-indigo-900">Terdaftar di DoChain</p>
+                        <p className="text-sm font-bold text-indigo-900">Terdaftar di DOCChain</p>
                         <span className={`rounded-full border px-2 py-0.5 text-[10px] font-bold ${statusColor}`}>
-                            {match.status}
+                            {formatDocumentStatus(match.status)}
                         </span>
                     </div>
                     <p className="mt-0.5 text-xs text-indigo-700 truncate">
@@ -533,6 +597,117 @@ function DbMatchCard({ match }: { match: DbMatchResult }) {
                     )}
                 </div>
             </div>
+        </div>
+    );
+}
+
+function BlockchainCard({ record, fileHash }: { record: BlockchainRecord | null; fileHash: string }) {
+    if (!record?.exists) {
+        return (
+            <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <Database className="h-5 w-5 shrink-0 text-slate-400" />
+                <div>
+                    <p className="text-sm font-semibold text-slate-700">Tidak ditemukan di blockchain</p>
+                    <p className="text-xs text-slate-500">Hash file ini belum tercatat pada DocumentHashRegistry Besu.</p>
+                </div>
+            </div>
+        );
+    }
+
+    const hashMatches = record.documentHash.toLowerCase().replace(/^0x/, '') === fileHash.toLowerCase();
+
+    return (
+        <div className={`rounded-xl border px-4 py-4 ${record.revoked ? 'border-red-200 bg-red-50' : hashMatches ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+            <div className="flex items-start gap-3">
+                <ShieldCheck className={`mt-0.5 h-5 w-5 shrink-0 ${record.revoked ? 'text-red-600' : hashMatches ? 'text-emerald-600' : 'text-amber-600'}`} />
+                <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-slate-900">
+                        Bukti blockchain
+                    </p>
+                    <p className="mt-0.5 text-xs text-slate-600">
+                        {record.revoked ? 'Hash file tercatat, namun status on-chain sudah dicabut.' : hashMatches ? 'Hash file cocok dengan catatan on-chain dan statusnya aktif.' : 'Hash file tidak cocok dengan catatan on-chain.'}
+                    </p>
+                    <div className="mt-3 grid gap-2 text-xs sm:grid-cols-3">
+                        <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-2">
+                            <p className="font-semibold text-slate-500">Hash file</p>
+                            <p className={`mt-0.5 font-bold ${hashMatches ? 'text-emerald-700' : 'text-amber-700'}`}>
+                                {hashMatches ? 'Cocok' : 'Tidak cocok'}
+                            </p>
+                        </div>
+                        <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-2">
+                            <p className="font-semibold text-slate-500">Status</p>
+                            <p className={`mt-0.5 font-bold ${record.revoked ? 'text-red-700' : 'text-emerald-700'}`}>
+                                {record.revoked ? 'Dicabut' : 'Aktif'}
+                            </p>
+                        </div>
+                        <div className="rounded-lg border border-white/70 bg-white/70 px-3 py-2">
+                            <p className="font-semibold text-slate-500">Waktu catat</p>
+                            <p className="mt-0.5 font-bold text-slate-800">{formatDate(record.issuedAt)}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function TechnicalDetailsCard({
+    result,
+}: {
+    result: InspectResult;
+}) {
+    const [expanded, setExpanded] = useState(false);
+    const record = result.blockchain;
+
+    const rows = [
+        { label: 'SHA-256 hash file upload', value: result.fileHash },
+        { label: 'Hash dokumen on-chain', value: record?.documentHash ?? null },
+        { label: 'Smart contract', value: record?.contractAddress ?? null },
+        { label: 'Issuer on-chain', value: record?.issuer ?? null },
+        { label: 'IPFS CID final PDF', value: record?.ipfsCid ?? null },
+        { label: 'Waktu catat on-chain', value: formatDate(record?.issuedAt ?? null), plain: true },
+        { label: 'Status revoke on-chain', value: record?.exists ? (record.revoked ? 'Dicabut' : 'Aktif') : '-', plain: true },
+        { label: 'Waktu revoke on-chain', value: formatDate(record?.revokedAt ?? null), plain: true },
+        { label: 'Hash alasan revoke', value: record?.revokeReasonHash ?? null },
+        { label: 'Document ID database', value: result.dbMatch.documentId },
+    ];
+
+    return (
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+            <button
+                type="button"
+                onClick={() => setExpanded((current) => !current)}
+                className="flex w-full items-center justify-between px-5 py-4 text-left transition hover:bg-slate-50"
+            >
+                <div className="flex items-center gap-2">
+                    <Fingerprint className="h-4 w-4 text-slate-500" />
+                    <div>
+                        <p className="text-sm font-bold text-slate-900">Detail teknis verifikasi</p>
+                        <p className="text-xs text-slate-500">Hash, IPFS, contract, issuer, dan data teknis lain.</p>
+                    </div>
+                </div>
+                {expanded ? (
+                    <ChevronDown className="h-4 w-4 text-slate-400" />
+                ) : (
+                    <ChevronRight className="h-4 w-4 text-slate-400" />
+                )}
+            </button>
+
+            {expanded && (
+                <div className="space-y-3 border-t border-slate-100 px-5 py-4">
+                    {rows.map((row) => (
+                        <div key={row.label} className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2.5">
+                            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">{row.label}</p>
+                            <p className="mt-1 text-xs font-semibold text-slate-800">
+                                {row.plain ? row.value : <HashValue value={row.value} />}
+                            </p>
+                        </div>
+                    ))}
+                    <p className="text-xs leading-5 text-slate-500">
+                        Detail ini ditujukan untuk audit teknis. Untuk pengguna umum, status utama di bagian atas sudah cukup untuk menentukan apakah dokumen valid, berubah, tidak terdaftar, atau dicabut.
+                    </p>
+                </div>
+            )}
         </div>
     );
 }
@@ -565,7 +740,8 @@ function FileMetaCard({ result, fileName }: { result: InspectResult; fileName: s
                     </div>
                 ))}
 
-                {/* SHA-256 Hash row with copy button */}
+                {false && (
+                /* SHA-256 Hash row with copy button */
                 <div className="flex items-start gap-3 py-3">
                     <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100">
                         <Hash className="h-4 w-4 text-slate-500" />
@@ -589,6 +765,7 @@ function FileMetaCard({ result, fileName }: { result: InspectResult; fileName: s
                         </div>
                     </div>
                 </div>
+                )}
             </div>
         </div>
     );
@@ -634,31 +811,27 @@ export default function VerifyDocumentPage() {
     }, []);
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-100 via-slate-50 to-indigo-50/30 px-4 py-10">
-            {/* Decorative blobs */}
-            <div className="pointer-events-none fixed -top-32 -right-32 h-96 w-96 rounded-full bg-indigo-400/10 blur-3xl" />
-            <div className="pointer-events-none fixed -bottom-32 -left-32 h-96 w-96 rounded-full bg-violet-400/10 blur-3xl" />
-
-            <div className="relative mx-auto w-full max-w-2xl space-y-6">
+        <div className="min-h-screen bg-[#f6f8fb] px-4 py-8">
+            <div className="mx-auto w-full max-w-5xl space-y-5">
 
                 {/* Branding header */}
-                <div className="flex flex-col items-center gap-2 text-center">
-                    <div className="flex items-center gap-2">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 shadow-lg">
+                <div className="rounded-lg border border-slate-200 bg-white px-5 py-5 text-center shadow-sm">
+                    <div className="mx-auto flex w-fit items-center gap-2">
+                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600">
                             <ShieldCheck className="h-5 w-5 text-white" />
                         </div>
-                        <span className="text-lg font-extrabold tracking-tight text-slate-800">DoChain</span>
+                        <span className="text-lg font-bold tracking-tight text-slate-950">DOCChain</span>
                     </div>
-                    <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">
+                    <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-950">
                         Verifikasi Dokumen PDF
                     </h1>
-                    <p className="text-sm text-slate-500 max-w-sm">
-                        Unggah dokumen PDF untuk memeriksa tanda tangan digital, rantai sertifikat, dan integritas dokumen secara menyeluruh.
+                    <p className="mx-auto mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                        Unggah dokumen PDF untuk memeriksa kecocokan hash blockchain, status dokumen, tanda tangan digital, dan integritas file.
                     </p>
                 </div>
 
                 {/* Drop zone */}
-                <DropZone onFile={(f) => void handleFile(f)} loading={loading} />
+                {!result && <DropZone onFile={(f) => void handleFile(f)} loading={loading} />}
 
                 {/* Error state */}
                 {error && (
@@ -677,14 +850,20 @@ export default function VerifyDocumentPage() {
                         {/* DB match */}
                         <DbMatchCard match={result.dbMatch} />
 
+                        {/* Blockchain match */}
+                        <BlockchainCard record={result.blockchain} fileHash={result.fileHash} />
+
                         {/* File metadata */}
                         <FileMetaCard result={result} fileName={fileName} />
+
+                        {/* Technical details */}
+                        <TechnicalDetailsCard result={result} />
 
                         {/* Signature panels */}
                         {result.signatures.length > 0 && (
                             <div className="space-y-4">
                                 <h2 className="flex items-center gap-2 text-sm font-bold text-slate-700">
-                                    <Fingerprint className="h-4 w-4 text-indigo-600" />
+                                    <Fingerprint className="h-4 w-4 text-blue-700" />
                                     Tanda Tangan Digital ({result.signatures.length})
                                 </h2>
                                 {result.signatures.map((sig, i) => (
@@ -699,7 +878,7 @@ export default function VerifyDocumentPage() {
                                 id="verify-another-btn"
                                 type="button"
                                 onClick={() => { setResult(null); setError(''); setFileName(''); }}
-                                className="rounded-xl border border-slate-200 bg-white px-6 py-2.5 text-sm font-semibold text-slate-600 shadow-sm hover:border-indigo-300 hover:text-indigo-700 transition-all"
+                                className="rounded-lg border border-slate-200 bg-white px-6 py-2.5 text-sm font-semibold text-slate-600 shadow-sm transition-all hover:border-blue-300 hover:text-blue-700"
                             >
                                 Verifikasi Dokumen Lain
                             </button>
@@ -709,7 +888,7 @@ export default function VerifyDocumentPage() {
 
                 {/* Footer */}
                 <p className="text-center text-xs text-slate-400">
-                    DoChain · Sistem Sertifikasi Dokumen Digital · Hyperledger Besu + IPFS
+                    DOCChain · Sistem Sertifikasi Dokumen Digital · Hyperledger Besu + IPFS
                     <br />
                     File yang diunggah diproses di memori server dan tidak disimpan.
                 </p>

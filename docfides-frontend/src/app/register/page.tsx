@@ -44,7 +44,7 @@ export default function RegisterPage() {
             <ShieldCheck className="h-5 w-5 text-white" />
           </div>
           <div>
-            <p className="text-sm font-bold text-white">DoChain</p>
+            <p className="text-sm font-bold text-white">DOCChain</p>
             <p className="text-[11px] text-blue-200">Sistem Sertifikasi Digital</p>
           </div>
         </div>
@@ -52,7 +52,7 @@ export default function RegisterPage() {
         {/* Headline */}
         <div className="flex flex-1 flex-col justify-center px-10">
           <h1 className="text-3xl font-extrabold leading-tight text-white">
-            Buat Akun DoChain Anda
+            Buat Akun DOCChain Anda
           </h1>
           <p className="mt-3 text-sm leading-relaxed text-blue-100">
             Register publik hanya untuk mahasiswa. Role pegawai, admin prodi, kaprodi, kajur, dan superadmin dibuat melalui panel admin.
@@ -94,7 +94,7 @@ export default function RegisterPage() {
 
         {/* Footer */}
         <p className="px-10 pb-8 text-xs text-blue-300">
-          © 2026 DoChain · Hyperledger Besu + IPFS
+          © 2026 DOCChain · Hyperledger Besu + IPFS
         </p>
       </aside>
 
@@ -118,7 +118,7 @@ export default function RegisterPage() {
                 <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-600">
                   <ShieldCheck className="h-4 w-4 text-white" />
                 </div>
-                <span className="text-sm font-bold text-gray-900">DoChain</span>
+                <span className="text-sm font-bold text-gray-900">DOCChain</span>
               </div>
             )}
           </div>

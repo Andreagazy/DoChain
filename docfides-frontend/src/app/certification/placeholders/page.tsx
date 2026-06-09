@@ -12,6 +12,7 @@ import { CertificationStepper } from '@/components/certification/certification-s
 import {
     getCertificationDocumentOriginalFile,
     getDocumentSignerPlaceholders,
+    getIdentityProfile,
     getIdentityStatus,
     getSignatureStatus,
     getUser,
@@ -29,6 +30,9 @@ import {
 } from '@/lib/certification-flow';
 import type { OwnedDocumentItem, SignerCandidate, User } from '@/types/auth';
 
+const getSignerDisplayName = (signer?: Pick<SignerCandidate, 'certificateName' | 'fullName' | 'displayName' | 'email'> | null) =>
+    signer?.certificateName ?? signer?.fullName ?? signer?.displayName ?? signer?.email ?? 'Signer';
+
 function CertificationPlaceholdersContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -39,6 +43,7 @@ function CertificationPlaceholdersContent() {
     const [success, setSuccess] = useState('');
 
     const [currentUser, setCurrentUser] = useState<User | null>(null);
+    const [currentUserFullName, setCurrentUserFullName] = useState<string | null>(null);
     const [preferredMode, setPreferredMode] = useState<'visible' | 'invisible'>('invisible');
     const [hasSignature, setHasSignature] = useState(false);
     const [myDocuments, setMyDocuments] = useState<OwnedDocumentItem[]>([]);
@@ -75,16 +80,17 @@ function CertificationPlaceholdersContent() {
             options.unshift({
                 id: currentUser.id,
                 email: currentUser.email,
-                displayName: `${currentUser.displayName ?? 'Saya'} (Owner Dokumen)`,
+                displayName: currentUser.displayName ?? 'Saya',
+                fullName: currentUserFullName,
+                certificateName: `${currentUserFullName ?? currentUser.displayName ?? 'Saya'} (Pemilik Dokumen)`,
                 role: currentUser.role,
-                signerLevel: 0,
                 academicProfile: currentUser.academicProfile ?? null,
                 preferredSignatureMode: preferredMode,
             });
         }
 
         return options;
-    }, [currentUser, preferredMode, signerCandidates]);
+    }, [currentUser, currentUserFullName, preferredMode, signerCandidates]);
 
     const signerPreferenceById = useMemo(
         () => new Map(signerOptions.map((item) => [item.id, item.preferredSignatureMode])),
@@ -116,20 +122,22 @@ function CertificationPlaceholdersContent() {
             try {
                 setCurrentUser(getUser());
 
-                const [identityStatus, signatureStatus, documents, candidates] = await Promise.all([
+                const [identityStatus, identityProfile, signatureStatus, documents, candidates] = await Promise.all([
                     getIdentityStatus(),
+                    getIdentityProfile(),
                     getSignatureStatus(),
                     listMyCertificationDocuments(),
                     listSignerCandidates(),
                 ]);
 
                 if (identityStatus.status !== 'APPROVED') {
-                    router.push('/identity');
+                    router.push('/profile#identitas-ktp');
                     return;
                 }
 
                 setPreferredMode(signatureStatus.preferredSignatureMode);
                 setHasSignature(signatureStatus.hasSignature);
+                setCurrentUserFullName(identityProfile.fullName ?? null);
                 setMyDocuments(documents.documents);
                 setSignerCandidates(candidates.signers);
 
@@ -498,7 +506,7 @@ function CertificationPlaceholdersContent() {
     }
 
     return (
-        <AppShell title="Certification - Placeholder" subtitle="Langkah ketiga: letakkan posisi signature untuk signer visible.">
+        <AppShell title="Sertifikasi - Placeholder" subtitle="Langkah ketiga: letakkan posisi tanda tangan visible.">
             <div className="space-y-6">
                 <CertificationStepper currentStep="placeholders" documentId={selectedDocumentId} />
 
@@ -514,8 +522,16 @@ function CertificationPlaceholdersContent() {
                     </Alert>
                 ) : null}
 
-                <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_380px]">
-                    <Card className="border-slate-200 bg-white/90 shadow-sm">
+                <section className="rounded-2xl border border-blue-100 bg-blue-50 p-6 shadow-sm">
+                    <Badge className="rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-bold uppercase tracking-wide text-blue-700 hover:bg-white">Placeholder Signature</Badge>
+                    <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-950 md:text-3xl">Tempatkan area tanda tangan visible.</h1>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                        Pilih signer visible di panel kanan, lalu klik halaman PDF untuk menentukan posisi tanda tangan.
+                    </p>
+                </section>
+
+                <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+                    <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
                         <CardHeader className="pb-3">
                             <CardTitle>Preview Dokumen</CardTitle>
                             <CardDescription>Klik area PDF untuk menaruh placeholder visible pada signer aktif.</CardDescription>
@@ -613,7 +629,7 @@ function CertificationPlaceholdersContent() {
                         </CardContent>
                     </Card>
 
-                    <Card className="border-slate-200 bg-white/90 shadow-sm xl:sticky xl:top-24 xl:self-start">
+                    <Card className="rounded-2xl border-slate-200 bg-white shadow-sm xl:sticky xl:top-24 xl:self-start">
                         <CardHeader className="pb-3">
                             <CardTitle>Urutan Signer</CardTitle>
                             <CardDescription>Pilih signer visible, lalu klik posisi pada preview.</CardDescription>
@@ -632,7 +648,7 @@ function CertificationPlaceholdersContent() {
                                             <div key={signerId} className={`rounded-md border p-3 ${activePickerSignerId === signerId ? 'border-blue-200 bg-blue-50' : 'border-slate-200 bg-slate-50'}`}>
                                                 <div className="flex items-start justify-between gap-2">
                                                     <div className="min-w-0">
-                                                        <p className="text-sm font-semibold text-slate-900">#{index + 1} {signer?.displayName ?? signer?.email ?? signerId}</p>
+                                                        <p className="text-sm font-semibold text-slate-900">#{index + 1} {getSignerDisplayName(signer)}</p>
                                                         <p className="mt-1 truncate text-xs text-slate-600">{signer?.email ?? signerId}</p>
                                                         {signer?.academicProfile ? (
                                                             <p className="mt-1 truncate text-xs text-slate-600">{signer.academicProfile.label ?? signer.academicProfile.unitName}</p>

@@ -10,17 +10,16 @@ const navItems = [
     { href: '/documents', label: 'Dokumen', icon: FolderOpen },
     { href: '/certification', label: 'Sertifikasi', icon: PenSquare },
     { href: '/certification/assigned', label: 'Perlu Ditandatangani', icon: Inbox },
-    { href: '/identity', label: 'Identitas', icon: ShieldCheck },
     { href: '/signature-setup', label: 'Tanda Tangan', icon: FileSignature },
     { href: '/profile', label: 'Profil', icon: UserCircle },
 ];
 
 const adminNavItems = [
     { href: '/admin', label: 'Admin Overview', icon: LayoutDashboard },
-    { href: '/admin/users', label: 'Admin User', icon: Users },
+    { href: '/admin/users', label: 'Kelola User', icon: Users },
     { href: '/admin/identities', label: 'Verifikasi Identitas', icon: ShieldCheck },
     { href: '/admin/academic-units', label: 'Unit Akademik', icon: Building2 },
-    { href: '/admin/documents', label: 'Admin Dokumen', icon: ClipboardList },
+    { href: '/admin/documents', label: 'Kelola Dokumen', icon: ClipboardList },
     { href: '/profile', label: 'Profil', icon: UserCircle },
 ];
 
@@ -31,8 +30,8 @@ const adminProdiNavItems = [
     { href: '/certification/assigned', label: 'Perlu Ditandatangani', icon: Inbox },
     { href: '/signature-setup', label: 'Tanda Tangan', icon: FileSignature },
     { href: '/admin/identities', label: 'Verifikasi Identitas', icon: ShieldCheck },
-    { href: '/admin/users', label: 'Anggota Prodi', icon: Users },
-    { href: '/admin/documents', label: 'Dokumen Prodi', icon: ClipboardList },
+    { href: '/admin/users', label: 'Kelola User', icon: Users },
+    { href: '/admin/documents', label: 'Kelola Dokumen', icon: ClipboardList },
     { href: '/profile', label: 'Profil', icon: UserCircle },
 ];
 
@@ -60,7 +59,7 @@ export function AppSidebar() {
                         <FileText className="h-5.5 w-5.5" />
                     </div>
                     <div>
-                        <h1 className="text-md font-extrabold tracking-tight bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent font-display">DoChain</h1>
+                        <h1 className="text-md font-extrabold tracking-tight bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent font-display">DOCChain</h1>
                         <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Trust Protocol</p>
                     </div>
                 </div>

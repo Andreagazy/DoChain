@@ -1,139 +1,105 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import Link from 'next/link';
-import { ArrowRight, Cloud, FileUp, PenLine, PencilRuler, ScanText } from 'lucide-react';
+import { ArrowRight, FileUp, PenLine, PencilRuler, ScanText } from 'lucide-react';
 import { AppShell } from '@/components/layout/app-shell';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { getIpfsStatus } from '@/lib/auth-service';
-import type { IpfsStatusResponse } from '@/types/auth';
+import { Card, CardContent } from '@/components/ui/card';
 import { buildCertificationStepHref } from '../../lib/certification-flow';
 
 const STEPS = [
     {
         key: 'upload',
-        title: 'Upload dokumen',
-        description: 'Mulai dari drag and drop PDF, lalu lanjut ke langkah berikutnya.',
+        title: 'Upload Dokumen',
+        description: 'Unggah PDF baru atau lanjutkan dokumen draft yang sudah ada.',
         icon: FileUp,
     },
     {
         key: 'signers',
-        title: 'Pilih signer',
-        description: 'Atur urutan user lain atau diri sendiri yang akan sign.',
+        title: 'Pilih Signer',
+        description: 'Tentukan penandatangan sesuai urutan akademik dari level rendah ke tinggi.',
         icon: ScanText,
     },
     {
         key: 'placeholders',
-        title: 'Atur placeholder',
-        description: 'Tempatkan posisi tanda tangan untuk signer yang visible.',
+        title: 'Atur Placeholder',
+        description: 'Tempatkan area tanda tangan visible untuk signer yang memerlukannya.',
         icon: PencilRuler,
     },
     {
         key: 'review',
-        title: 'Review dan sign',
-        description: 'Cek ulang konfigurasi lalu lanjut ke penandatanganan.',
+        title: 'Review dan Sign',
+        description: 'Letakkan QR verifikasi, tinjau signer, lalu mulai proses tanda tangan.',
         icon: PenLine,
     },
 ] as const;
 
 export default function CertificationPage() {
-    const [ipfsStatus, setIpfsStatus] = useState<IpfsStatusResponse | null>(null);
-
     const stepLinks = useMemo(
         () => STEPS.map((step) => ({ ...step, href: buildCertificationStepHref(step.key) })),
         [],
     );
 
-    useEffect(() => {
-        let cancelled = false;
-
-        async function loadIpfsStatus() {
-            try {
-                const status = await getIpfsStatus();
-                if (!cancelled) {
-                    setIpfsStatus(status);
-                }
-            } catch {
-                if (!cancelled) {
-                    setIpfsStatus(null);
-                }
-            }
-        }
-
-        void loadIpfsStatus();
-
-        return () => {
-            cancelled = true;
-        };
-    }, []);
-
     return (
-        <AppShell title="Sertifikasi" subtitle="Upload PDF, pilih signer, lalu selesaikan tanda tangan.">
+        <AppShell title="Sertifikasi" subtitle="Kelola alur sertifikasi dokumen digital dari upload sampai final.">
             <div className="space-y-6">
-                <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-                    <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
-                        <div>
-                            <Badge variant="default">Alur Sertifikasi</Badge>
-                            <h1 className="mt-3 max-w-3xl text-2xl font-semibold leading-tight text-slate-950">
-                                Selesaikan dokumen dari upload sampai final signed.
+                <section className="rounded-2xl border border-blue-100 bg-blue-50 p-6 shadow-sm md:p-8">
+                    <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="max-w-3xl">
+                            <Badge className="rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-bold uppercase tracking-wide text-blue-700 hover:bg-white">
+                                Alur Sertifikasi DOCChain
+                            </Badge>
+                            <h1 className="mt-4 text-3xl font-bold tracking-tight text-slate-950 md:text-4xl">
+                                Sertifikasi dokumen dengan tanda tangan bertingkat.
                             </h1>
-                            <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                                Mulai dari dokumen baru, atau buka daftar dokumen yang perlu kamu tanda tangani.
+                            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
+                                Mulai dari upload PDF, pilih signer, tentukan posisi tanda tangan, letakkan QR verifikasi, lalu selesaikan tanda tangan digital.
                             </p>
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                            <Button asChild>
+                        <div className="flex flex-wrap gap-3">
+                            <Button asChild className="h-11 rounded-xl bg-blue-600 font-semibold text-white hover:bg-blue-700">
                                 <Link href={buildCertificationStepHref('upload')}>
                                     Mulai Sertifikasi
-                                    <ArrowRight className="h-4 w-4" />
+                                    <ArrowRight className="ml-2 h-4 w-4" />
                                 </Link>
                             </Button>
-                            <Button variant="outline" className="border-slate-300" asChild>
+                            <Button variant="outline" className="h-11 rounded-xl border-blue-200 bg-white font-semibold text-blue-700 hover:bg-blue-50" asChild>
                                 <Link href="/certification/assigned">Perlu Ditandatangani</Link>
                             </Button>
                         </div>
                     </div>
-
-                    <div className="mt-5 flex max-w-xl items-center gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
-                        <Cloud className={ipfsStatus?.connected ? 'h-4 w-4 text-emerald-700' : 'h-4 w-4 text-amber-700'} />
-                        <div className="min-w-0">
-                            <p className="font-medium text-slate-900">
-                                IPFS {ipfsStatus?.connected ? 'terhubung' : ipfsStatus?.configured === false ? 'belum dikonfigurasi' : 'belum terhubung'}
-                            </p>
-                            <p className="truncate text-xs text-slate-500">
-                                {ipfsStatus?.connected
-                                    ? `Gateway siap: ${ipfsStatus.gatewayUrl ?? '-'}`
-                                    : ipfsStatus?.error ?? 'Status IPFS belum tersedia'}
-                            </p>
-                        </div>
-                    </div>
                 </section>
 
-                <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-                    {stepLinks.map((step) => {
+                <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                    {stepLinks.map((step, index) => {
                         const Icon = step.icon;
 
                         return (
-                            <Link
-                                key={step.key}
-                                href={step.href}
-                                className="flex items-center justify-between gap-4 border-b border-slate-100 px-4 py-4 transition last:border-b-0 hover:bg-slate-50"
-                            >
-                                <div className="flex min-w-0 items-center gap-3">
-                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-blue-50 text-blue-700">
-                                        <Icon className="h-5 w-5" />
+                            <Card key={step.key} className="rounded-2xl border border-slate-200 bg-white shadow-sm transition hover:border-blue-100 hover:shadow-md">
+                                <CardContent className="p-5">
+                                    <div className="flex items-start justify-between gap-3">
+                                        <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-blue-50 text-blue-700">
+                                            <Icon className="h-5 w-5" />
+                                        </div>
+                                        <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-bold text-slate-500">
+                                            {index + 1}
+                                        </span>
                                     </div>
-                                    <div className="min-w-0">
-                                        <p className="font-semibold text-slate-950">{step.title}</p>
-                                        <p className="truncate text-sm text-slate-500">{step.description}</p>
-                                    </div>
-                                </div>
-                                <ArrowRight className="h-4 w-4 shrink-0 text-slate-400" />
-                            </Link>
+                                    <h2 className="mt-4 text-lg font-bold text-slate-950">{step.title}</h2>
+                                    <p className="mt-2 min-h-12 text-sm leading-6 text-slate-600">{step.description}</p>
+                                    <Button asChild variant="outline" className="mt-4 w-full rounded-xl border-slate-200 bg-white font-semibold hover:bg-blue-50 hover:text-blue-700">
+                                        <Link href={step.href}>
+                                            Buka Langkah
+                                            <ArrowRight className="ml-2 h-4 w-4" />
+                                        </Link>
+                                    </Button>
+                                </CardContent>
+                            </Card>
                         );
                     })}
-                </div>
+                </section>
             </div>
         </AppShell>
     );

@@ -6,85 +6,136 @@ contract DocumentHashRegistry {
 
     struct DocumentRecord {
         bytes32 documentHash;
-        string documentId;
         string ipfsCid;
-        address recordedBy;
-        uint256 recordedAt;
+        address issuer;
+        uint256 issuedAt;
+        bool revoked;
+        uint256 revokedAt;
+        bytes32 revokeReasonHash;
         bool exists;
     }
 
-    mapping(bytes32 => DocumentRecord) private records;
-    mapping(string => bytes32) private hashByDocumentId;
+    mapping(address => bool) public issuers;
+    mapping(bytes32 => DocumentRecord) private recordsByHash;
 
-    event DocumentHashRecorded(
+    event IssuerUpdated(address indexed issuer, bool allowed);
+
+    event DocumentRegistered(
         bytes32 indexed documentHash,
-        string indexed documentId,
         string ipfsCid,
-        address indexed recordedBy,
-        uint256 recordedAt
+        address indexed issuer,
+        uint256 issuedAt
     );
 
-    error EmptyDocumentId();
+    event DocumentRevoked(
+        bytes32 indexed documentHash,
+        address indexed revokedBy,
+        uint256 revokedAt,
+        bytes32 revokeReasonHash
+    );
+
+    error OnlyOwner();
+    error OnlyIssuer();
     error EmptyHash();
-    error DocumentAlreadyRecorded(bytes32 documentHash);
+    error DocumentAlreadyRegistered(bytes32 documentHash);
+    error DocumentNotFound(bytes32 documentHash);
+    error DocumentAlreadyRevoked(bytes32 documentHash);
+
+    modifier onlyOwner() {
+        if (msg.sender != owner) {
+            revert OnlyOwner();
+        }
+        _;
+    }
+
+    modifier onlyIssuer() {
+        if (!issuers[msg.sender]) {
+            revert OnlyIssuer();
+        }
+        _;
+    }
 
     constructor() {
         owner = msg.sender;
+        issuers[msg.sender] = true;
+        emit IssuerUpdated(msg.sender, true);
     }
 
-    function recordDocumentHash(
-        string calldata documentId,
+    function setIssuer(address issuer, bool allowed) external onlyOwner {
+        issuers[issuer] = allowed;
+        emit IssuerUpdated(issuer, allowed);
+    }
+
+    function registerDocument(
         bytes32 documentHash,
         string calldata ipfsCid
-    ) external {
-        if (bytes(documentId).length == 0) {
-            revert EmptyDocumentId();
-        }
-
+    ) external onlyIssuer {
         if (documentHash == bytes32(0)) {
             revert EmptyHash();
         }
 
-        if (records[documentHash].exists) {
-            revert DocumentAlreadyRecorded(documentHash);
+        if (recordsByHash[documentHash].exists) {
+            revert DocumentAlreadyRegistered(documentHash);
         }
 
-        uint256 recordedAt = block.timestamp;
+        uint256 issuedAt = block.timestamp;
 
-        records[documentHash] = DocumentRecord({
+        recordsByHash[documentHash] = DocumentRecord({
             documentHash: documentHash,
-            documentId: documentId,
             ipfsCid: ipfsCid,
-            recordedBy: msg.sender,
-            recordedAt: recordedAt,
+            issuer: msg.sender,
+            issuedAt: issuedAt,
+            revoked: false,
+            revokedAt: 0,
+            revokeReasonHash: bytes32(0),
             exists: true
         });
 
-        hashByDocumentId[documentId] = documentHash;
-
-        emit DocumentHashRecorded(
+        emit DocumentRegistered(
             documentHash,
-            documentId,
             ipfsCid,
             msg.sender,
-            recordedAt
+            issuedAt
+        );
+    }
+
+    function revokeDocument(
+        bytes32 documentHash,
+        bytes32 revokeReasonHash
+    ) external onlyIssuer {
+        DocumentRecord storage record = recordsByHash[documentHash];
+
+        if (!record.exists) {
+            revert DocumentNotFound(documentHash);
+        }
+
+        if (record.revoked) {
+            revert DocumentAlreadyRevoked(documentHash);
+        }
+
+        record.revoked = true;
+        record.revokedAt = block.timestamp;
+        record.revokeReasonHash = revokeReasonHash;
+
+        emit DocumentRevoked(
+            documentHash,
+            msg.sender,
+            record.revokedAt,
+            revokeReasonHash
         );
     }
 
     function getRecordByHash(
         bytes32 documentHash
     ) external view returns (DocumentRecord memory) {
-        return records[documentHash];
-    }
-
-    function getRecordByDocumentId(
-        string calldata documentId
-    ) external view returns (DocumentRecord memory) {
-        return records[hashByDocumentId[documentId]];
+        return recordsByHash[documentHash];
     }
 
     function isRecorded(bytes32 documentHash) external view returns (bool) {
-        return records[documentHash].exists;
+        return recordsByHash[documentHash].exists;
+    }
+
+    function isRevoked(bytes32 documentHash) external view returns (bool) {
+        return recordsByHash[documentHash].revoked;
     }
 }
-

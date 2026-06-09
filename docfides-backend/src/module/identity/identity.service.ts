@@ -31,6 +31,16 @@ export class IdentityService {
       where: { userId },
     });
 
+    if (existingIdentity?.status === 'PENDING') {
+      throw new BadRequestException(
+        'Data identitas sedang menunggu review. Perubahan baru bisa diajukan setelah admin memberi keputusan.',
+      );
+    }
+
+    if (existingIdentity?.status === 'APPROVED') {
+      return this.createIdentityChangeRequest(userId, dto, ktpFile);
+    }
+
     if (!existingIdentity && !ktpFile) {
       throw new BadRequestException(
         'File KTP wajib diunggah saat submit identitas pertama kali',
@@ -101,27 +111,45 @@ export class IdentityService {
   }
 
   async getMyIdentity(userId: string) {
-    const identity = await this.prisma.identity.findUnique({
-      where: { userId },
-      select: {
-        userId: true,
-        nik: true,
-        fullName: true,
-        birthPlace: true,
-        birthDate: true,
-        address: true,
-        ktpOriginalFileName: true,
-        ktpStoredFileName: true,
-        ktpStoragePath: true,
-        ktpMimeType: true,
-        ktpSizeBytes: true,
-        ktpUploadedAt: true,
-        status: true,
-        verifiedBy: true,
-        verifiedAt: true,
-        updatedAt: true,
-      },
-    });
+    const [identity, pendingChangeRequest] = await Promise.all([
+      this.prisma.identity.findUnique({
+        where: { userId },
+        select: {
+          userId: true,
+          nik: true,
+          fullName: true,
+          birthPlace: true,
+          birthDate: true,
+          address: true,
+          ktpOriginalFileName: true,
+          ktpStoredFileName: true,
+          ktpStoragePath: true,
+          ktpMimeType: true,
+          ktpSizeBytes: true,
+          ktpUploadedAt: true,
+          status: true,
+          verifiedBy: true,
+          verifiedAt: true,
+          updatedAt: true,
+        },
+      }),
+      this.prisma.identityChangeRequest.findFirst({
+        where: { userId, status: 'PENDING' },
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          nik: true,
+          fullName: true,
+          birthPlace: true,
+          birthDate: true,
+          address: true,
+          ktpOriginalFileName: true,
+          status: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      }),
+    ]);
 
     if (!identity) {
       return {
@@ -133,6 +161,7 @@ export class IdentityService {
     return {
       identityExists: true,
       ...identity,
+      pendingChangeRequest,
     };
   }
 
@@ -225,6 +254,148 @@ export class IdentityService {
     };
   }
 
+  async listPendingIdentityChangeRequests(reviewerUserId: string) {
+    const scope = await this.getReviewScope(reviewerUserId);
+
+    return this.prisma.identityChangeRequest.findMany({
+      where: {
+        status: 'PENDING',
+        ...(scope.prodiIds ? { user: this.userScopeWhere(scope.prodiIds) } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        userId: true,
+        nik: true,
+        fullName: true,
+        birthPlace: true,
+        birthDate: true,
+        address: true,
+        ktpOriginalFileName: true,
+        ktpStoragePath: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        user: {
+          select: {
+            email: true,
+            displayName: true,
+            role: true,
+            status: true,
+            identity: {
+              select: {
+                nik: true,
+                fullName: true,
+                birthPlace: true,
+                birthDate: true,
+                address: true,
+                ktpOriginalFileName: true,
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  async reviewIdentityChangeRequest(
+    reviewerUserId: string,
+    requestId: string,
+    dto: ReviewIdentityDto,
+  ) {
+    const request = await this.prisma.identityChangeRequest.findUnique({
+      where: { id: requestId },
+      select: {
+        id: true,
+        userId: true,
+        nik: true,
+        fullName: true,
+        birthPlace: true,
+        birthDate: true,
+        address: true,
+        ktpOriginalFileName: true,
+        ktpStoredFileName: true,
+        ktpStoragePath: true,
+        ktpMimeType: true,
+        ktpSizeBytes: true,
+        ktpUploadedAt: true,
+        status: true,
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Request perubahan identitas tidak ditemukan');
+    }
+
+    await this.ensureCanReviewUser(reviewerUserId, request.userId);
+
+    if (request.status !== 'PENDING') {
+      throw new BadRequestException('Request perubahan identitas sudah diproses');
+    }
+
+    if (dto.status === 'APPROVED') {
+      const existingNik = await this.prisma.identity.findUnique({
+        where: { nik: request.nik },
+        select: { userId: true },
+      });
+
+      if (existingNik && existingNik.userId !== request.userId) {
+        throw new BadRequestException('NIK sudah digunakan oleh user lain');
+      }
+
+      await this.prisma.$transaction(async (tx) => {
+        await tx.identity.update({
+          where: { userId: request.userId },
+          data: {
+            nik: request.nik,
+            fullName: request.fullName,
+            birthPlace: request.birthPlace,
+            birthDate: request.birthDate,
+            address: request.address,
+            ...(request.ktpStoragePath && {
+              ktpOriginalFileName: request.ktpOriginalFileName,
+              ktpStoredFileName: request.ktpStoredFileName,
+              ktpStoragePath: request.ktpStoragePath,
+              ktpMimeType: request.ktpMimeType,
+              ktpSizeBytes: request.ktpSizeBytes,
+              ktpUploadedAt: request.ktpUploadedAt,
+            }),
+            status: 'APPROVED',
+            verifiedBy: reviewerUserId,
+            verifiedAt: new Date(),
+          },
+        });
+
+        await tx.identityChangeRequest.update({
+          where: { id: request.id },
+          data: {
+            status: 'APPROVED',
+            reviewedById: reviewerUserId,
+            reviewedAt: new Date(),
+            rejectionReason: null,
+          },
+        });
+      });
+
+      return { message: 'Perubahan identitas berhasil di-approve' };
+    }
+
+    await this.prisma.identityChangeRequest.update({
+      where: { id: request.id },
+      data: {
+        status: 'REJECTED',
+        reviewedById: reviewerUserId,
+        reviewedAt: new Date(),
+        rejectionReason:
+          dto.rejectionReason?.trim() || 'Data perubahan identitas tidak valid',
+      },
+    });
+
+    return {
+      message: `Perubahan identitas ditolak${dto.rejectionReason ? `: ${dto.rejectionReason}` : ''}`,
+    };
+  }
+
   async resolveKtpPath(userId: string): Promise<string> {
     const identity = await this.prisma.identity.findUnique({
       where: { userId },
@@ -268,6 +439,112 @@ export class IdentityService {
   ): Promise<string> {
     await this.ensureCanReviewUser(reviewerUserId, targetUserId);
     return this.resolveKtpPath(targetUserId);
+  }
+
+  async resolveIdentityChangeRequestKtpPathForReviewer(
+    reviewerUserId: string,
+    requestId: string,
+  ): Promise<string> {
+    const request = await this.prisma.identityChangeRequest.findUnique({
+      where: { id: requestId },
+      select: {
+        userId: true,
+        ktpStoragePath: true,
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Request perubahan identitas tidak ditemukan');
+    }
+
+    await this.ensureCanReviewUser(reviewerUserId, request.userId);
+
+    if (request.ktpStoragePath) {
+      const metadataPath = resolve(process.cwd(), request.ktpStoragePath);
+      if (existsSync(metadataPath)) {
+        return metadataPath;
+      }
+    }
+
+    return this.resolveKtpPath(request.userId);
+  }
+
+  private async createIdentityChangeRequest(
+    userId: string,
+    dto: SubmitIdentityDto,
+    ktpFile?: Express.Multer.File,
+  ) {
+    const pendingRequest = await this.prisma.identityChangeRequest.findFirst({
+      where: { userId, status: 'PENDING' },
+      select: { id: true },
+    });
+
+    if (pendingRequest) {
+      throw new BadRequestException(
+        'Masih ada request perubahan identitas yang menunggu review admin',
+      );
+    }
+
+    const existingNik = await this.prisma.identity.findUnique({
+      where: { nik: dto.nik },
+      select: { userId: true },
+    });
+
+    if (existingNik && existingNik.userId !== userId) {
+      throw new BadRequestException('NIK sudah digunakan oleh user lain');
+    }
+
+    const pendingNik = await this.prisma.identityChangeRequest.findFirst({
+      where: {
+        nik: dto.nik,
+        status: 'PENDING',
+        userId: { not: userId },
+      },
+      select: { id: true },
+    });
+
+    if (pendingNik) {
+      throw new BadRequestException('NIK sedang diajukan oleh user lain');
+    }
+
+    const request = await this.prisma.identityChangeRequest.create({
+      data: {
+        userId,
+        nik: dto.nik,
+        fullName: dto.fullName,
+        birthPlace: dto.birthPlace,
+        birthDate: new Date(dto.birthDate),
+        address: dto.address,
+        ...(ktpFile && {
+          ktpOriginalFileName: ktpFile.originalname,
+          ktpStoredFileName: ktpFile.filename,
+          ktpStoragePath: relative(process.cwd(), ktpFile.path),
+          ktpMimeType: ktpFile.mimetype,
+          ktpSizeBytes: ktpFile.size,
+          ktpUploadedAt: new Date(),
+        }),
+        status: 'PENDING',
+      },
+      select: {
+        id: true,
+        userId: true,
+        nik: true,
+        fullName: true,
+        birthPlace: true,
+        birthDate: true,
+        address: true,
+        ktpOriginalFileName: true,
+        status: true,
+        createdAt: true,
+      },
+    });
+
+    return {
+      message: 'Request perubahan identitas berhasil diajukan dan menunggu review admin',
+      identityChangeRequest: request,
+      ktpUploaded: Boolean(ktpFile),
+      ktpPath: ktpFile?.path ?? null,
+    };
   }
 
   private async getReviewScope(userId: string) {

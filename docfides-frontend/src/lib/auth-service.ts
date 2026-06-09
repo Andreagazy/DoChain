@@ -26,6 +26,7 @@ import {
     DeclineDocumentPayload,
     RequestSignersPayload,
     RequestSignersResponse,
+    CertificationDocumentDetailResponse,
     UploadDocumentResponse,
     OwnedDocumentsResponse,
     AssignedDocumentsResponse,
@@ -46,6 +47,9 @@ import {
     RevokeAdminDocumentResponse,
     IpfsStatusResponse,
     UpdateProfilePayload,
+    IdentityChangeRequestItem,
+    AcademicProfileChangePayload,
+    AcademicProfileChangeRequestItem,
 } from '@/types/auth';
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
@@ -167,6 +171,16 @@ export const changePassword = async (
     return response.data;
 };
 
+export const requestAcademicProfileChange = async (
+    payload: AcademicProfileChangePayload,
+): Promise<{ message: string }> => {
+    const response = await api.post<{ message: string }>(
+        '/auth/academic-profile/change-request',
+        payload,
+    );
+    return response.data;
+};
+
 export const getIdentityStatus = async (): Promise<IdentityStatusResponse> => {
     const response = await api.get<IdentityStatusResponse>('/identity/status');
     return response.data;
@@ -253,6 +267,14 @@ export const getSignatureStatus = async (): Promise<SignatureStatusResponse> => 
     return response.data;
 };
 
+export const getSignatureImageFile = async (): Promise<Blob> => {
+    const response = await api.get('/certification/signature/file', {
+        responseType: 'blob',
+    });
+
+    return response.data as Blob;
+};
+
 export const getIpfsStatus = async (): Promise<IpfsStatusResponse> => {
     const response = await api.get<IpfsStatusResponse>('/certification/ipfs/status');
     return response.data;
@@ -279,6 +301,15 @@ export const uploadDocumentForCertification = async (
 
 export const listMyCertificationDocuments = async (): Promise<OwnedDocumentsResponse> => {
     const response = await api.get<OwnedDocumentsResponse>('/certification/documents/my');
+    return response.data;
+};
+
+export const getCertificationDocumentDetail = async (
+    documentId: string,
+): Promise<CertificationDocumentDetailResponse> => {
+    const response = await api.get<CertificationDocumentDetailResponse>(
+        `/certification/documents/${documentId}`,
+    );
     return response.data;
 };
 
@@ -482,6 +513,24 @@ export const resetAdminUserPassword = async (
     return response.data;
 };
 
+export const listAcademicProfileChangeRequests = async (): Promise<AcademicProfileChangeRequestItem[]> => {
+    const response = await api.get<{ requests: AcademicProfileChangeRequestItem[] }>(
+        '/admin/academic-profile-change-requests',
+    );
+    return response.data.requests;
+};
+
+export const reviewAcademicProfileChangeRequest = async (
+    requestId: string,
+    payload: ReviewIdentityDto,
+): Promise<{ message: string }> => {
+    const response = await api.patch<{ message: string }>(
+        `/admin/academic-profile-change-requests/${requestId}/review`,
+        payload,
+    );
+    return response.data;
+};
+
 export const listAdminIdentities = async (): Promise<AdminIdentitiesResponse> => {
     const response = await api.get<AdminIdentitiesResponse>('/admin/identities');
     return response.data;
@@ -493,6 +542,29 @@ export const reviewAdminIdentity = async (
 ): Promise<{ message: string }> => {
     const response = await api.patch<{ message: string }>(`/admin/identities/${userId}/review`, payload);
     return response.data;
+};
+
+export const listIdentityChangeRequests = async (): Promise<IdentityChangeRequestItem[]> => {
+    const response = await api.get<IdentityChangeRequestItem[]>('/identity/change-requests/pending');
+    return response.data;
+};
+
+export const reviewIdentityChangeRequest = async (
+    requestId: string,
+    payload: ReviewIdentityDto,
+): Promise<{ message: string }> => {
+    const response = await api.patch<{ message: string }>(
+        `/identity/change-requests/${requestId}/review`,
+        payload,
+    );
+    return response.data;
+};
+
+export const getIdentityChangeRequestKtpFile = async (requestId: string): Promise<Blob> => {
+    const response = await api.get(`/identity/change-requests/${requestId}/ktp`, {
+        responseType: 'blob',
+    });
+    return response.data as Blob;
 };
 
 export const listAdminDocuments = async (): Promise<AdminDocumentsResponse> => {

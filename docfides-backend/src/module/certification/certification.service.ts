@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
@@ -32,7 +33,7 @@ import { DeclineDocumentDto } from './dto/decline-document.dto';
 import { UpdateSignaturePreferenceDto } from './dto/update-signature-preference.dto';
 import { FinalizeQrDto } from './dto/finalize-qr.dto';
 import { IpfsService } from './ipfs.service';
-import { BlockchainService } from './blockchain.service';
+import { BlockchainService } from '../blockchain/blockchain.service';
 
 type SignerPlaceholderConfig = {
   visiblePage: number | null;
@@ -76,8 +77,12 @@ const SIGNER_ROLE_RANK: Record<string, number> = {
   SUPERADMIN: 60,
 };
 
+const DEFAULT_QR_CODE_SIZE = 48;
+
 @Injectable()
 export class CertificationService {
+  private readonly logger = new Logger(CertificationService.name);
+
   constructor(
     private prisma: PrismaService,
     private ipfsService: IpfsService,
@@ -266,6 +271,165 @@ export class CertificationService {
     };
   }
 
+  async getDocumentDetail(userId: string, documentId: string) {
+    const document = await this.prisma.document.findUnique({
+      where: { id: documentId },
+      select: {
+        id: true,
+        userId: true,
+        status: true,
+        originalFileName: true,
+        finalFileName: true,
+        originalFileSize: true,
+        finalFileSize: true,
+        qrCodePage: true,
+        revokedAt: true,
+        revokeReason: true,
+        createdAt: true,
+        updatedAt: true,
+        user: {
+          select: {
+            email: true,
+            displayName: true,
+            identity: {
+              select: {
+                fullName: true,
+              },
+            },
+          },
+        },
+        requiredSigners: {
+          orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+          select: {
+            userId: true,
+            status: true,
+            order: true,
+            signedAt: true,
+            declinedAt: true,
+            declineReason: true,
+            updatedAt: true,
+            user: {
+              select: {
+                email: true,
+                displayName: true,
+                role: true,
+                identity: {
+                  select: {
+                    fullName: true,
+                  },
+                },
+              },
+            },
+            signature: {
+              select: {
+                id: true,
+                order: true,
+                signedAt: true,
+              },
+            },
+          },
+        },
+        signatures: {
+          orderBy: [{ order: 'asc' }, { signedAt: 'asc' }],
+          select: {
+            id: true,
+            order: true,
+            signedAt: true,
+            signerId: true,
+            signer: {
+              select: {
+                email: true,
+                displayName: true,
+                role: true,
+                identity: {
+                  select: {
+                    fullName: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        _count: {
+          select: {
+            requiredSigners: true,
+            signatures: true,
+          },
+        },
+      },
+    });
+
+    if (!document) {
+      throw new NotFoundException('Dokumen tidak ditemukan');
+    }
+
+    const isOwner = document.userId === userId;
+    const isAssignedSigner = document.requiredSigners.some(
+      (signer) => signer.userId === userId,
+    );
+
+    if (!isOwner && !isAssignedSigner) {
+      throw new NotFoundException('Dokumen tidak ditemukan atau bukan akses Anda');
+    }
+
+    return {
+      document: {
+        id: document.id,
+        status: document.status,
+        originalFileName: document.originalFileName,
+        finalFileName: document.finalFileName,
+        originalFileSize: document.originalFileSize,
+        finalFileSize: document.finalFileSize,
+        hasVerificationQr: document.qrCodePage != null,
+        revokedAt: document.revokedAt,
+        revokeReason: document.revokeReason,
+        createdAt: document.createdAt,
+        updatedAt: document.updatedAt,
+        owner: {
+          email: document.user?.email ?? null,
+          displayName: document.user?.displayName ?? null,
+          fullName: document.user?.identity?.fullName ?? null,
+        },
+        requiredSignerCount: document._count.requiredSigners,
+        signatureCount: document._count.signatures,
+      },
+      signingProcess: document.requiredSigners.map((signer) => ({
+        userId: signer.userId,
+        order: signer.order,
+        status: signer.status,
+        signedAt: signer.signedAt,
+        declinedAt: signer.declinedAt,
+        declineReason: signer.declineReason,
+        updatedAt: signer.updatedAt,
+        signer: {
+          email: signer.user.email,
+          displayName: signer.user.displayName,
+          fullName: signer.user.identity?.fullName ?? null,
+          role: signer.user.role,
+        },
+        signature: signer.signature
+          ? {
+              id: signer.signature.id,
+              order: signer.signature.order,
+              signedAt: signer.signature.signedAt,
+            }
+          : null,
+      })),
+      signatures: document.signatures.map((signature) => ({
+        id: signature.id,
+        order: signature.order,
+        signedAt: signature.signedAt,
+        signerId: signature.signerId,
+        signer: {
+          email: signature.signer.email,
+          displayName: signature.signer.displayName,
+          fullName: signature.signer.identity?.fullName ?? null,
+          role: signature.signer.role,
+        },
+      })),
+    };
+  }
+
   async getDocumentFileForPreview(userId: string, documentId: string) {
     return this.getDocumentFileByVariant(userId, documentId, 'latest');
   }
@@ -315,6 +479,11 @@ export class CertificationService {
           select: {
             email: true,
             displayName: true,
+            identity: {
+              select: {
+                fullName: true,
+              },
+            },
           },
         },
       },
@@ -328,6 +497,7 @@ export class CertificationService {
         status: item.status,
         email: item.user?.email ?? null,
         displayName: item.user?.displayName ?? null,
+        fullName: item.user?.identity?.fullName ?? null,
         placeholder: {
           visiblePage: item.visiblePage,
           visibleX: item.visibleX,
@@ -420,7 +590,7 @@ export class CertificationService {
       variant === 'original'
         ? (document.originalFileName ?? `${document.id}.pdf`)
         : variant === 'signed'
-          ? (document.finalFileName ?? `${document.id}-signed.pdf`)
+          ? this.buildSignedPdfFileName(document.originalFileName)
           : (document.finalFileName ??
             document.originalFileName ??
             `${document.id}.pdf`);
@@ -449,6 +619,11 @@ export class CertificationService {
         displayName: true,
         role: true,
         preferredSignatureMode: true,
+        identity: {
+          select: {
+            fullName: true,
+          },
+        },
         studentProfile: {
           select: {
             nim: true,
@@ -478,7 +653,9 @@ export class CertificationService {
       const rankB = SIGNER_ROLE_RANK[b.role] ?? 999;
       return (
         rankA - rankB ||
-        (a.displayName ?? a.email).localeCompare(b.displayName ?? b.email)
+        (a.identity?.fullName ?? a.displayName ?? a.email).localeCompare(
+          b.identity?.fullName ?? b.displayName ?? b.email,
+        )
       );
     });
 
@@ -487,6 +664,9 @@ export class CertificationService {
         id: user.id,
         email: user.email,
         displayName: user.displayName,
+        fullName: user.identity?.fullName ?? null,
+        certificateName:
+          user.identity?.fullName ?? user.displayName ?? user.email,
         role: user.role,
         signerLevel: SIGNER_ROLE_RANK[user.role] ?? 999,
         academicProfile: this.buildSignerAcademicProfile(user),
@@ -517,6 +697,25 @@ export class CertificationService {
         storagePath: signaturePath,
       },
       preferredSignatureMode: preferredMode.toLowerCase(),
+    };
+  }
+
+  getSignatureImageFile(userId: string) {
+    const signaturePath = this.resolveSignatureImagePath(userId);
+
+    if (!signaturePath) {
+      throw new NotFoundException('Tanda tangan belum tersedia');
+    }
+
+    const fileName = signaturePath.split(/[\\/]/).pop() ?? 'signature.png';
+    const extension = extname(fileName).toLowerCase();
+    const mimeType =
+      extension === '.jpg' || extension === '.jpeg' ? 'image/jpeg' : 'image/png';
+
+    return {
+      fileName,
+      mimeType,
+      content: readFileSync(signaturePath),
     };
   }
 
@@ -636,6 +835,11 @@ export class CertificationService {
         displayName: true,
         role: true,
         preferredSignatureMode: true,
+        identity: {
+          select: {
+            fullName: true,
+          },
+        },
         studentProfile: {
           select: {
             nim: true,
@@ -933,6 +1137,9 @@ export class CertificationService {
           userId: item.userId,
           email: user?.email ?? null,
           displayName: user?.displayName ?? null,
+          fullName: user?.identity?.fullName ?? null,
+          certificateName:
+            user?.identity?.fullName ?? user?.displayName ?? user?.email ?? null,
           role: user?.role ?? null,
           signerLevel: user?.role ? (SIGNER_ROLE_RANK[user.role] ?? 999) : null,
           academicProfile: user ? this.buildSignerAcademicProfile(user) : null,
@@ -1267,22 +1474,12 @@ export class CertificationService {
 
     const signedOutput = this.saveSignedDocument(
       documentStorageOwnerId,
-      document.id,
+      document.originalFileName,
       signedPdfBuffer,
     );
     const signedHash = this.sha256Hex(signedPdfBuffer);
     const shouldFinalizeDocument =
       totalRequiredSignersBeforeSign === 0 || pendingSignersAfterSign === 0;
-    const ipfsResult = shouldFinalizeDocument
-      ? await this.ipfsService.addPdf(signedPdfBuffer, signedOutput.fileName)
-      : null;
-    const blockchainResult = shouldFinalizeDocument
-      ? await this.blockchainService.recordFinalDocumentHash(
-          document.id,
-          signedHash,
-          ipfsResult?.cid ?? null,
-        )
-      : null;
 
     const maxOrder = await this.prisma.signature.aggregate({
       where: { documentId },
@@ -1297,9 +1494,6 @@ export class CertificationService {
           signerId: userId,
           certificateId,
           signedFileHash: signedHash,
-          signedFileIpfsHash: ipfsResult?.cid ?? null,
-          documentHash: signedHash,
-          blockchainTxHash: blockchainResult?.txHash ?? null,
           order: nextOrder,
         },
         select: {
@@ -1344,7 +1538,8 @@ export class CertificationService {
           finalFileName: signedOutput.fileName,
           finalFileHash: signedHash,
           finalFileSize: signedOutput.sizeBytes,
-          finalFileIpfsHash: ipfsResult?.cid ?? null,
+          finalFileIpfsHash: null,
+          blockchainTxHash: null,
         },
         select: {
           id: true,
@@ -1352,6 +1547,7 @@ export class CertificationService {
           finalFileName: true,
           finalFileHash: true,
           finalFileIpfsHash: true,
+          blockchainTxHash: true,
           finalFileSize: true,
           updatedAt: true,
         },
@@ -1363,6 +1559,15 @@ export class CertificationService {
       };
     });
 
+    if (shouldFinalizeDocument) {
+      this.recordFinalDocumentProofInBackground(
+        documentId,
+        signedHash,
+        signedPdfBuffer,
+        signedOutput.fileName,
+      );
+    }
+
     return {
       message: 'Dokumen berhasil ditandatangani secara digital',
       mode: effectiveSignDto.mode,
@@ -1370,13 +1575,80 @@ export class CertificationService {
         fileName: signedOutput.fileName,
         storagePath: signedOutput.absolutePath,
         hash: signedHash,
-        ipfsHash: ipfsResult?.cid ?? null,
-        ipfsGatewayUrl: ipfsResult?.gatewayUrl ?? null,
-        blockchainTxHash: blockchainResult?.txHash ?? null,
+        ipfsHash: null,
+        ipfsGatewayUrl: null,
+        blockchainTxHash: null,
         sizeBytes: signedOutput.sizeBytes,
       },
       ...transactionResult,
     };
+  }
+
+  private recordFinalDocumentProofInBackground(
+    documentId: string,
+    documentHash: string,
+    pdfBuffer: Buffer,
+    fileName: string,
+  ) {
+    void this.recordFinalDocumentProof(
+      documentId,
+      documentHash,
+      pdfBuffer,
+      fileName,
+    );
+  }
+
+  private async recordFinalDocumentProof(
+    documentId: string,
+    documentHash: string,
+    pdfBuffer: Buffer,
+    fileName: string,
+  ) {
+    let ipfsCid: string | null = null;
+
+    try {
+      const ipfsResult = await this.ipfsService.addPdf(pdfBuffer, fileName);
+      ipfsCid = ipfsResult?.cid ?? null;
+    } catch (err) {
+      this.logger.warn(
+        `Upload IPFS final document ${documentId} gagal: ${
+          err instanceof Error ? err.message : 'unknown error'
+        }`,
+      );
+    }
+
+    let blockchainTxHash: string | null = null;
+
+    try {
+      const blockchainResult =
+        await this.blockchainService.recordFinalDocumentHash(
+          documentHash,
+          ipfsCid,
+        );
+      blockchainTxHash = blockchainResult?.txHash ?? null;
+    } catch (err) {
+      this.logger.warn(
+        `Pencatatan blockchain final document ${documentId} gagal: ${
+          err instanceof Error ? err.message : 'unknown error'
+        }`,
+      );
+    }
+
+    try {
+      await this.prisma.document.update({
+        where: { id: documentId },
+        data: {
+          finalFileIpfsHash: ipfsCid,
+          blockchainTxHash,
+        },
+      });
+    } catch (err) {
+      this.logger.warn(
+        `Update proof final document ${documentId} gagal: ${
+          err instanceof Error ? err.message : 'unknown error'
+        }`,
+      );
+    }
   }
 
   async finalizeQr(userId: string, documentId: string, dto: FinalizeQrDto) {
@@ -1442,7 +1714,7 @@ export class CertificationService {
       originalFileHash: document.originalFileHash,
     });
 
-    const qrWidth = dto.width ?? 96;
+    const qrWidth = dto.width ?? DEFAULT_QR_CODE_SIZE;
     const qrHeight = dto.height ?? qrWidth;
     const finalizedBuffer = Buffer.from(
       await this.renderVerificationQrCode(readFileSync(sourceDocumentPath), document.id, {
@@ -1455,7 +1727,7 @@ export class CertificationService {
     );
     const finalizedOutput = this.saveSignedDocument(
       document.userId,
-      document.id,
+      document.originalFileName,
       finalizedBuffer,
     );
     const finalizedHash = this.sha256Hex(finalizedBuffer);
@@ -1710,7 +1982,7 @@ export class CertificationService {
       Math.min(placement.qrCodePage - 1, pages.length - 1),
     );
     const page = pages[pageIndex];
-    const width = placement.qrCodeWidth ?? 96;
+    const width = placement.qrCodeWidth ?? DEFAULT_QR_CODE_SIZE;
     const height = placement.qrCodeHeight ?? width;
     const verificationBaseUrl =
       process.env.DOCUMENT_VERIFICATION_URL ??
@@ -2075,20 +2347,20 @@ export class CertificationService {
       pdflibAddPlaceholder({
         pdfDoc,
         pdfPage: targetPage,
-        reason: dto.reason ?? 'DocFides digital signature',
+        reason: dto.reason ?? 'DOCChain digital signature',
         name: `User ${userId}`,
-        contactInfo: 'support@dochain.local',
-        location: 'DocFides',
+        contactInfo: 'support@docchain.local',
+        location: 'DOCChain',
         signingTime: new Date(),
         widgetRect: [x, y, x + width, y + height],
       });
     } else {
       pdflibAddPlaceholder({
         pdfDoc,
-        reason: dto.reason ?? 'DocFides digital signature',
+        reason: dto.reason ?? 'DOCChain digital signature',
         name: `User ${userId}`,
-        contactInfo: 'support@dochain.local',
-        location: 'DocFides',
+        contactInfo: 'support@docchain.local',
+        location: 'DOCChain',
         signingTime: new Date(),
       });
     }
@@ -2111,10 +2383,10 @@ export class CertificationService {
 
     return plainAddPlaceholder({
       pdfBuffer: sourcePdf,
-      reason: dto.reason ?? 'DocFides digital signature',
+      reason: dto.reason ?? 'DOCChain digital signature',
       name: `User ${userId}`,
-      contactInfo: 'support@dochain.local',
-      location: 'DocFides',
+      contactInfo: 'support@docchain.local',
+      location: 'DOCChain',
       signingTime: new Date(),
       ...(dto.mode === SignatureMode.VISIBLE
         ? { widgetRect: [x, y, x + width, y + height] }
@@ -2124,7 +2396,7 @@ export class CertificationService {
 
   private saveSignedDocument(
     userId: string,
-    documentId: string,
+    originalFileName: string | null,
     content: Buffer,
   ) {
     const signedRoot = resolve(
@@ -2134,7 +2406,7 @@ export class CertificationService {
     const userDir = resolve(signedRoot, userId);
     mkdirSync(userDir, { recursive: true });
 
-    const fileName = `${documentId}-${Date.now()}-signed.pdf`;
+    const fileName = this.buildSignedPdfFileName(originalFileName);
     const absolutePath = resolve(userDir, fileName);
     writeFileSync(absolutePath, content);
 
@@ -2173,7 +2445,7 @@ export class CertificationService {
       signerProfile?.email?.trim() ||
       userId
     ).replace(/,/g, ' ');
-    const organizationName = 'DoChain';
+    const organizationName = 'DOCChain';
     const subjectDn = `CN=${commonName},O=${organizationName},C=ID`;
     const caIdentity = this.loadCertificateAuthority();
     const issuerDn = this.formatForgeDn(caIdentity.certificate.subject.attributes);
@@ -2325,35 +2597,65 @@ export class CertificationService {
     );
   }
 
+  private buildSignedPdfFileName(
+    originalFileName: string | null,
+  ) {
+    const fallbackName = 'dokumen';
+    const baseName = (originalFileName ?? fallbackName)
+      .replace(/\.pdf$/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const safeBaseName =
+      baseName
+        .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+        .replace(/\.+$/g, '')
+        .replace(/-+/g, '-')
+        .trim() || fallbackName;
+
+    return `${safeBaseName}-signed.pdf`;
+  }
+
   private loadCertificateAuthority(): {
     certificate: forge.pki.Certificate;
     privateKey: forge.pki.rsa.PrivateKey;
   } {
+    const defaultDocchainCertPath = 'certs/docchain-ca.crt';
+    const defaultDocchainKeyPath = 'certs/docchain-ca.key';
     const caCertPath = resolve(
       process.cwd(),
-      process.env.DOCHAIN_CA_CERT_PATH ?? 'certs/dochain-ca.crt',
+      process.env.DOCCHAIN_CA_CERT_PATH ??
+        process.env.DOCHAIN_CA_CERT_PATH ??
+        (existsSync(resolve(process.cwd(), defaultDocchainCertPath))
+          ? defaultDocchainCertPath
+          : 'certs/dochain-ca.crt'),
     );
     const caKeyPath = resolve(
       process.cwd(),
-      process.env.DOCHAIN_CA_KEY_PATH ?? 'certs/dochain-ca.key',
+      process.env.DOCCHAIN_CA_KEY_PATH ??
+        process.env.DOCHAIN_CA_KEY_PATH ??
+        (existsSync(resolve(process.cwd(), defaultDocchainKeyPath))
+          ? defaultDocchainKeyPath
+          : 'certs/dochain-ca.key'),
     );
 
     if (!existsSync(caCertPath) || !existsSync(caKeyPath)) {
       throw new BadRequestException(
-        'DoChain CA belum tersedia. Generate certs/dochain-ca.crt dan certs/dochain-ca.key terlebih dahulu.',
+        'DOCChain CA belum tersedia. Generate certs/docchain-ca.crt dan certs/docchain-ca.key terlebih dahulu.',
       );
     }
 
     const certificatePem = readFileSync(caCertPath, 'utf8');
     const privateKeyPem = readFileSync(caKeyPath, 'utf8');
     const certificate = forge.pki.certificateFromPem(certificatePem);
-    const passphrase = process.env.DOCHAIN_CA_KEY_PASSPHRASE;
+    const passphrase =
+      process.env.DOCCHAIN_CA_KEY_PASSPHRASE ??
+      process.env.DOCHAIN_CA_KEY_PASSPHRASE;
     const privateKey = passphrase
       ? forge.pki.decryptRsaPrivateKey(privateKeyPem, passphrase)
       : forge.pki.privateKeyFromPem(privateKeyPem);
 
     if (!privateKey) {
-      throw new BadRequestException('Private key DoChain CA tidak valid');
+      throw new BadRequestException('Private key DOCChain CA tidak valid');
     }
 
     return {
@@ -2383,7 +2685,7 @@ export class CertificationService {
   }
 
   private sealSecret(plainText: string): string {
-    const secret = process.env.CERT_SECRET_KEY ?? 'docfides-dev-secret';
+    const secret = process.env.CERT_SECRET_KEY ?? 'dochain-dev-secret';
     const key = createHash('sha256').update(secret).digest();
     const iv = randomBytes(12);
     const cipher = createCipheriv('aes-256-gcm', key, iv);
@@ -2398,7 +2700,7 @@ export class CertificationService {
   }
 
   private unsealSecret(sealedText: string): string {
-    const secret = process.env.CERT_SECRET_KEY ?? 'docfides-dev-secret';
+    const secret = process.env.CERT_SECRET_KEY ?? 'dochain-dev-secret';
     const key = createHash('sha256').update(secret).digest();
 
     const [version, ivB64, tagB64, encryptedB64] = sealedText.split(':');

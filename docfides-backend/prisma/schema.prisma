@@ -89,6 +89,10 @@ model User {
   deletedAt       DateTime?  
 
   identity        Identity?
+  identityChangeRequests IdentityChangeRequest[] @relation("IdentityChangeRequestOwner")
+  reviewedIdentityChangeRequests IdentityChangeRequest[] @relation("IdentityChangeRequestReviewer")
+  academicProfileChangeRequests AcademicProfileChangeRequest[] @relation("AcademicProfileChangeRequestOwner")
+  reviewedAcademicProfileChangeRequests AcademicProfileChangeRequest[] @relation("AcademicProfileChangeRequestReviewer")
   studentProfile  StudentProfile?
   employeeProfile EmployeeProfile?
   structuralAssignments StructuralAssignment[]
@@ -113,6 +117,7 @@ model AcademicUnit {
   isActive    Boolean          @default(true)
 
   studentProfiles       StudentProfile[]
+  academicProfileChangeRequests AcademicProfileChangeRequest[]
   employeeProfiles      EmployeeProfile[]
   structuralAssignments StructuralAssignment[]
 
@@ -139,6 +144,32 @@ model StudentProfile {
 
   @@index([prodiId])
   @@map("student_profiles")
+}
+
+model AcademicProfileChangeRequest {
+  id        String @id @default(uuid())
+  userId    String
+  user      User   @relation("AcademicProfileChangeRequestOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  nim       String
+  prodiId   String
+  prodi     AcademicUnit @relation(fields: [prodiId], references: [id], onDelete: Restrict)
+  angkatan  Int?
+  kelas     String?
+
+  status    VerificationStatus @default(PENDING)
+  reviewedById String?
+  reviewedBy   User? @relation("AcademicProfileChangeRequestReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt   DateTime?
+  rejectionReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([prodiId])
+  @@index([reviewedById])
+  @@map("academic_profile_change_requests")
 }
 
 model EmployeeProfile {
@@ -203,6 +234,38 @@ model Identity {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("identities")
+}
+
+model IdentityChangeRequest {
+  id             String @id @default(uuid())
+  userId         String
+  user           User   @relation("IdentityChangeRequestOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  nik            String
+  fullName       String
+  birthPlace     String?
+  birthDate      DateTime
+  address        String
+
+  ktpOriginalFileName String?
+  ktpStoredFileName   String?
+  ktpStoragePath      String?
+  ktpMimeType         String?
+  ktpSizeBytes        Int?
+  ktpUploadedAt       DateTime?
+
+  status         VerificationStatus @default(PENDING)
+  reviewedById   String?
+  reviewedBy     User? @relation("IdentityChangeRequestReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt     DateTime?
+  rejectionReason String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([reviewedById])
+  @@map("identity_change_requests")
 }
 
 model Certificate {
@@ -285,6 +348,7 @@ model Document {
   finalFileHash       String?          // SHA-256 file final
   finalFileSize       Int?             // Ukuran file final
   finalFileIpfsHash   String?          // Jika disimpan di IPFS
+  blockchainTxHash    String?          // Hash transaksi pencatatan final di Hyperledger Besu
 
   qrCodePage          Int?
   qrCodeX             Float?
@@ -355,10 +419,6 @@ model Signature {
   signedAt            DateTime       @default(now())
   // Hash dokumen setelah tanda tangan ini (untuk menyimpan versi intermediate)
   signedFileHash      String?        // SHA-256 file setelah tanda tangan ini
-  signedFileIpfsHash  String?        // Jika disimpan di IPFS
-  // Hash yang dicatat di blockchain (biasanya hash dari file final atau hash khusus)
-  documentHash        String         // Hash yang dikirim ke blockchain
-  blockchainTxHash    String?        // Hash transaksi di Hyperledger Besu
 
   // Urutan tanda tangan
   order               Int            @default(0)

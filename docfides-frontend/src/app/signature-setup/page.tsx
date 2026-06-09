@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
 import { AxiosError } from 'axios';
@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { getIdentityStatus, getSignatureStatus, updateSignaturePreference, uploadSignatureImage } from '@/lib/auth-service';
+import { getIdentityStatus, getSignatureImageFile, getSignatureStatus, updateSignaturePreference, uploadSignatureImage } from '@/lib/auth-service';
 
 type ApiError = {
     message?: string | string[];
@@ -48,6 +48,8 @@ function SignatureSetupContent() {
     const [mode, setMode] = useState<'invisible' | 'visible'>('invisible');
     const [signatureFile, setSignatureFile] = useState<File | null>(null);
     const [signaturePreviewUrl, setSignaturePreviewUrl] = useState('');
+    const [storedSignaturePreviewUrl, setStoredSignaturePreviewUrl] = useState('');
+    const [storedSignatureImage, setStoredSignatureImage] = useState<{ width: number; height: number } | null>(null);
     const [signatureImage, setSignatureImage] = useState<{ width: number; height: number } | null>(null);
     const [cropRect, setCropRect] = useState<CropRect | null>(null);
     const [cropInteraction, setCropInteraction] = useState<CropInteraction>(null);
@@ -90,6 +92,27 @@ function SignatureSetupContent() {
                 setIdentityApproved(identityStatus.status === 'APPROVED');
                 setHasSignature(signatureStatus.hasSignature);
                 setMode(signatureStatus.preferredSignatureMode);
+
+                if (signatureStatus.hasSignature) {
+                    try {
+                        const signatureBlob = await getSignatureImageFile();
+                        const objectUrl = URL.createObjectURL(signatureBlob);
+                        setStoredSignaturePreviewUrl(objectUrl);
+
+                        const image = new globalThis.Image();
+                        image.onload = () => {
+                            setStoredSignatureImage({
+                                width: image.naturalWidth,
+                                height: image.naturalHeight,
+                            });
+                        };
+                        image.onerror = () => setStoredSignatureImage(null);
+                        image.src = objectUrl;
+                    } catch {
+                        setStoredSignaturePreviewUrl('');
+                        setStoredSignatureImage(null);
+                    }
+                }
             } catch (err) {
                 setError(normalizeErrorMessage(err));
             } finally {
@@ -109,6 +132,14 @@ function SignatureSetupContent() {
             }
         };
     }, [signaturePreviewUrl]);
+
+    useEffect(() => {
+        return () => {
+            if (storedSignaturePreviewUrl) {
+                URL.revokeObjectURL(storedSignaturePreviewUrl);
+            }
+        };
+    }, [storedSignaturePreviewUrl]);
 
     useEffect(() => {
         if (!signatureFile) {
@@ -142,6 +173,44 @@ function SignatureSetupContent() {
     }, [signatureFile]);
 
     const renderCropRect = cropRect ?? defaultCropRect;
+
+    const cropPreviewStyle = useMemo<CSSProperties | null>(() => {
+        if (!signaturePreviewUrl || !signatureImage || !renderCropRect) {
+            return null;
+        }
+
+        const previewScale = Math.min(1, 360 / renderCropRect.width);
+        const width = Math.max(48, Math.round(renderCropRect.width * previewScale));
+        const height = Math.max(21, Math.round(renderCropRect.height * previewScale));
+
+        return {
+            width,
+            height,
+            backgroundImage: `url(${signaturePreviewUrl})`,
+            backgroundRepeat: 'no-repeat',
+            backgroundSize: `${signatureImage.width * previewScale}px ${signatureImage.height * previewScale}px`,
+            backgroundPosition: `${-renderCropRect.x * previewScale}px ${-renderCropRect.y * previewScale}px`,
+        };
+    }, [renderCropRect, signatureImage, signaturePreviewUrl]);
+
+    const storedSignaturePreviewStyle = useMemo<CSSProperties | null>(() => {
+        if (!storedSignaturePreviewUrl || !storedSignatureImage) {
+            return null;
+        }
+
+        const previewScale = Math.min(1, 360 / storedSignatureImage.width);
+        const width = Math.max(48, Math.round(storedSignatureImage.width * previewScale));
+        const height = Math.max(21, Math.round(storedSignatureImage.height * previewScale));
+
+        return {
+            width,
+            height,
+            backgroundImage: `url(${storedSignaturePreviewUrl})`,
+            backgroundRepeat: 'no-repeat',
+            backgroundSize: `${width}px ${height}px`,
+            backgroundPosition: 'center',
+        };
+    }, [storedSignatureImage, storedSignaturePreviewUrl]);
 
     const clampCropRect = (rect: CropRect, image: { width: number; height: number }): CropRect => {
         const width = Math.max(1, Math.min(rect.width, image.width));
@@ -201,20 +270,44 @@ function SignatureSetupContent() {
 
         const offsetX = point.x - startingRect.x;
         const offsetY = point.y - startingRect.y;
+        const containerRect = previewContainerRef.current?.getBoundingClientRect();
+        let pendingRect: CropRect | null = null;
+        let animationFrame: number | null = null;
 
-        const moveHandler = (moveEvent: globalThis.MouseEvent) => {
-            if (!previewContainerRef.current || !signatureImage) {
+        const scheduleCropRectUpdate = (nextRect: CropRect) => {
+            pendingRect = nextRect;
+
+            if (animationFrame !== null) {
                 return;
             }
 
-            const containerRect = previewContainerRef.current.getBoundingClientRect();
+            animationFrame = window.requestAnimationFrame(() => {
+                if (pendingRect) {
+                    setCropRect(pendingRect);
+                }
+                pendingRect = null;
+                animationFrame = null;
+            });
+        };
+
+        const moveHandler = (moveEvent: globalThis.MouseEvent) => {
+            if (!containerRect || !signatureImage) {
+                return;
+            }
+
             const nextX = ((moveEvent.clientX - containerRect.left) / containerRect.width) * signatureImage.width - offsetX;
             const nextY = ((moveEvent.clientY - containerRect.top) / containerRect.height) * signatureImage.height - offsetY;
 
-            setCropRect(clampCropRect({ ...startingRect, x: Math.round(nextX), y: Math.round(nextY) }, signatureImage));
+            scheduleCropRectUpdate(clampCropRect({ ...startingRect, x: Math.round(nextX), y: Math.round(nextY) }, signatureImage));
         };
 
         const upHandler = () => {
+            if (animationFrame !== null) {
+                window.cancelAnimationFrame(animationFrame);
+            }
+            if (pendingRect) {
+                setCropRect(pendingRect);
+            }
             setCropInteraction(null);
             window.removeEventListener('mousemove', moveHandler);
             window.removeEventListener('mouseup', upHandler);
@@ -237,13 +330,31 @@ function SignatureSetupContent() {
         if (!startPoint) {
             return;
         }
+        const containerRect = previewContainerRef.current?.getBoundingClientRect();
+        let pendingRect: CropRect | null = null;
+        let animationFrame: number | null = null;
 
-        const moveHandler = (moveEvent: globalThis.MouseEvent) => {
-            if (!previewContainerRef.current || !signatureImage) {
+        const scheduleCropRectUpdate = (nextRect: CropRect) => {
+            pendingRect = nextRect;
+
+            if (animationFrame !== null) {
                 return;
             }
 
-            const containerRect = previewContainerRef.current.getBoundingClientRect();
+            animationFrame = window.requestAnimationFrame(() => {
+                if (pendingRect) {
+                    setCropRect(pendingRect);
+                }
+                pendingRect = null;
+                animationFrame = null;
+            });
+        };
+
+        const moveHandler = (moveEvent: globalThis.MouseEvent) => {
+            if (!containerRect || !signatureImage) {
+                return;
+            }
+
             const currentPointX = ((moveEvent.clientX - containerRect.left) / containerRect.width) * signatureImage.width;
             const currentPointY = ((moveEvent.clientY - containerRect.top) / containerRect.height) * signatureImage.height;
 
@@ -254,10 +365,16 @@ function SignatureSetupContent() {
                 signatureImage,
             );
 
-            setCropRect(nextRect);
+            scheduleCropRectUpdate(nextRect);
         };
 
         const upHandler = () => {
+            if (animationFrame !== null) {
+                window.cancelAnimationFrame(animationFrame);
+            }
+            if (pendingRect) {
+                setCropRect(pendingRect);
+            }
             setCropInteraction(null);
             window.removeEventListener('mousemove', moveHandler);
             window.removeEventListener('mouseup', upHandler);
@@ -422,7 +539,7 @@ function SignatureSetupContent() {
                             </CardDescription>
                         </CardHeader>
                         <CardContent>
-                            <Button onClick={() => router.push('/identity')}>Ke Verifikasi Identitas</Button>
+                            <Button onClick={() => router.push('/profile#identitas-ktp')}>Ke Verifikasi Identitas</Button>
                         </CardContent>
                     </Card>
                 )}
@@ -475,6 +592,39 @@ function SignatureSetupContent() {
                                     <p className="text-xs text-emerald-700">Tanda tangan tersimpan sudah ada, Anda bisa langsung lanjut.</p>
                                 )}
 
+                                {hasSignature && storedSignaturePreviewUrl && !signatureFile && (
+                                    <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+                                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                                            <div>
+                                                <p className="text-sm font-semibold text-emerald-950">Preview tanda tangan tersimpan</p>
+                                                <p className="mt-1 text-xs text-emerald-800">
+                                                    Ini adalah gambar tanda tangan visible yang sedang aktif. Upload file baru jika ingin menggantinya.
+                                                </p>
+                                            </div>
+                                            <Badge variant="success">Aktif</Badge>
+                                        </div>
+                                        <div className="mt-4 overflow-auto rounded-lg border border-emerald-100 bg-white p-4">
+                                            {storedSignaturePreviewStyle ? (
+                                                <div
+                                                    aria-label="Preview tanda tangan tersimpan"
+                                                    className="mx-auto rounded border border-slate-200 bg-white shadow-sm"
+                                                    style={storedSignaturePreviewStyle}
+                                                />
+                                            ) : (
+                                                <div className="flex h-24 items-center justify-center gap-2 text-sm text-slate-500">
+                                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                                    Memuat preview tanda tangan...
+                                                </div>
+                                            )}
+                                            {storedSignatureImage && (
+                                                <p className="mt-3 text-center text-xs text-slate-500">
+                                                    Ukuran tersimpan: {storedSignatureImage.width} x {storedSignatureImage.height}px
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
                                 {signaturePreviewUrl && signatureImage && renderCropRect && (
                                     <div className="space-y-3 pt-2">
                                         <div className="flex flex-wrap gap-2">
@@ -511,6 +661,7 @@ function SignatureSetupContent() {
                                                         width: `${(renderCropRect.width / signatureImage.width) * 100}%`,
                                                         height: `${(renderCropRect.height / signatureImage.height) * 100}%`,
                                                         cursor: cropCursor,
+                                                        willChange: 'left, top, width, height',
                                                     }}
                                                 >
                                                     <span className="absolute -top-5 left-0 rounded bg-slate-900 px-1.5 py-0.5 text-[10px] text-white">
@@ -530,6 +681,29 @@ function SignatureSetupContent() {
                                         <p className="text-xs text-slate-600">
                                             Geser area biru untuk memindahkan crop, atau tarik kotak kecil di sudut kanan-bawah untuk memperbesar/perkecil. Rasio crop tetap dikunci agar cocok dengan placeholder signature di PDF.
                                         </p>
+
+                                        {cropPreviewStyle && (
+                                            <div className="rounded-xl border border-blue-100 bg-blue-50 p-4">
+                                                <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
+                                                    <div>
+                                                        <p className="text-sm font-semibold text-slate-950">Preview hasil crop</p>
+                                                        <p className="text-xs text-slate-600">
+                                                            Tampilan ini mengikuti area biru yang akan disimpan sebagai tanda tangan.
+                                                        </p>
+                                                    </div>
+                                                    <Badge variant="neutral">
+                                                        {renderCropRect.width} x {renderCropRect.height}px
+                                                    </Badge>
+                                                </div>
+                                                <div className="mt-4 overflow-auto rounded-lg border border-blue-100 bg-white p-4">
+                                                    <div
+                                                        aria-label="Preview hasil crop tanda tangan"
+                                                        className="mx-auto rounded border border-slate-200 bg-white shadow-sm"
+                                                        style={cropPreviewStyle}
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>

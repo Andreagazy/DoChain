@@ -2,16 +2,21 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowRight, Users } from 'lucide-react';
+import Link from 'next/link';
+import { ArrowRight, CheckCircle2, Clock3, FileText, Loader2, PenLine, UserCheck, Users, XCircle } from 'lucide-react';
 import { AxiosError } from 'axios';
 import { AppShell } from '@/components/layout/app-shell';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { getCertificationEligibility, getCertificationDocumentFile } from '@/lib/auth-service';
+import {
+    getCertificationDocumentDetail,
+    getCertificationDocumentFile,
+    getCertificationEligibility,
+} from '@/lib/auth-service';
 import { buildCertificationStepHref, getDocumentNextCertificationStep } from '@/lib/certification-flow';
-import type { CertificationEligibilityResponse } from '@/types/auth';
+import type { CertificationDocumentDetailResponse, CertificationEligibilityResponse } from '@/types/auth';
 
 function normalizeErrorMessage(err: unknown): string {
     const axiosError = err as AxiosError<{ message?: string | string[] }>;
@@ -19,12 +24,73 @@ function normalizeErrorMessage(err: unknown): string {
     return Array.isArray(message) ? message.join(', ') : message ?? axiosError.message ?? 'Terjadi kesalahan';
 }
 
+const documentStatusLabels: Record<string, string> = {
+    DRAFT: 'Draft',
+    UPLOADED: 'Baru Diupload',
+    PENDING_SIGNATURE: 'Menunggu Tanda Tangan',
+    PENDING_SIGNATURES: 'Menunggu Tanda Tangan',
+    PARTIALLY_SIGNED: 'Sebagian Ditandatangani',
+    FULLY_SIGNED: 'Final',
+    REJECTED: 'Ditolak',
+    REVOKED: 'Dicabut',
+};
+
+const signerStatusLabels: Record<string, string> = {
+    PENDING: 'Menunggu',
+    SIGNED: 'Ditandatangani',
+    DECLINED: 'Ditolak',
+    REJECTED: 'Ditolak',
+};
+
+const getDocumentStatusLabel = (status: string) =>
+    documentStatusLabels[status] ?? status.replaceAll('_', ' ');
+
+const getSignerStatusLabel = (status: string) =>
+    signerStatusLabels[status] ?? status.replaceAll('_', ' ');
+
+const getDocumentBadgeVariant = (status: string) => {
+    if (status === 'FULLY_SIGNED') return 'success';
+    if (status === 'REVOKED' || status === 'REJECTED') return 'destructive';
+    if (status === 'PENDING_SIGNATURE' || status === 'PENDING_SIGNATURES' || status === 'PARTIALLY_SIGNED') {
+        return 'warning';
+    }
+    return 'default';
+};
+
+const getSignerBadgeVariant = (status: string) => {
+    if (status === 'SIGNED') return 'success';
+    if (status === 'DECLINED' || status === 'REJECTED') return 'destructive';
+    return 'warning';
+};
+
+const formatDateTime = (value?: string | null) => {
+    if (!value) return '-';
+    return new Intl.DateTimeFormat('id-ID', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    }).format(new Date(value));
+};
+
+const formatFileSize = (value?: number | null) => {
+    if (!value) return '-';
+    if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+    return `${(value / (1024 * 1024)).toFixed(2)} MB`;
+};
+
+const getSignerName = (
+    signer: CertificationDocumentDetailResponse['signingProcess'][number]['signer'],
+) => signer.fullName ?? signer.displayName ?? signer.email;
+
 export default function DocumentDetailPage() {
     const router = useRouter();
     const params = useParams<{ id: string }>();
     const documentId = params.id;
 
     const [eligibility, setEligibility] = useState<CertificationEligibilityResponse | null>(null);
+    const [detail, setDetail] = useState<CertificationDocumentDetailResponse | null>(null);
     const [previewUrl, setPreviewUrl] = useState('');
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -35,12 +101,14 @@ export default function DocumentDetailPage() {
         async function loadDetail() {
             setError('');
             try {
-                const [eligibilityRes, previewBlob] = await Promise.all([
+                const [eligibilityRes, detailRes, previewBlob] = await Promise.all([
                     getCertificationEligibility(documentId),
+                    getCertificationDocumentDetail(documentId),
                     getCertificationDocumentFile(documentId),
                 ]);
 
                 setEligibility(eligibilityRes);
+                setDetail(detailRes);
                 nextPreviewUrl = URL.createObjectURL(previewBlob);
                 setPreviewUrl(nextPreviewUrl);
             } catch (err) {
@@ -59,46 +127,24 @@ export default function DocumentDetailPage() {
         };
     }, [documentId]);
 
-    const timelineItems = useMemo(() => {
-        if (!eligibility) {
-            return [];
-        }
-
-        const status = eligibility.document.status;
-        return [
-            { label: 'Uploaded', done: true },
-            { label: 'Verified', done: status !== 'DRAFT' },
-            { label: 'Signed', done: status.includes('SIGNED') || status.includes('APPROVED') },
-            { label: 'Completed', done: status === 'FULLY_SIGNED' || status === 'APPROVED' },
-        ];
-    }, [eligibility]);
-
     const nextStep = useMemo(() => {
-        if (!eligibility) {
-            return null;
-        }
-
+        if (!eligibility) return null;
         return getDocumentNextCertificationStep(eligibility.document.status);
     }, [eligibility]);
 
     const nextActionLabel = useMemo(() => {
-        if (!eligibility || !nextStep) {
-            return 'Lanjutkan';
-        }
-
-        if (nextStep === 'signers') {
-            return 'Tambah Signer';
-        }
-
-        if (nextStep === 'placeholders') {
-            return 'Atur Placeholder';
-        }
-
+        if (!eligibility || !nextStep) return 'Lanjutkan';
+        if (nextStep === 'signers') return 'Tambah Signer';
+        if (nextStep === 'placeholders') return 'Atur Placeholder';
         return 'Buka Review dan Sign';
     }, [eligibility, nextStep]);
 
+    const signingProcess = detail?.signingProcess ?? [];
+    const signedCount = signingProcess.filter((item) => item.status === 'SIGNED').length;
+    const declinedSigner = signingProcess.find((item) => item.status === 'DECLINED' || item.status === 'REJECTED');
+
     return (
-        <AppShell title="Document Detail" subtitle="Lihat status dokumen dan lanjutkan langkah sertifikasi.">
+        <AppShell title="Detail Dokumen" subtitle="Lihat preview dokumen dan proses tanda tangan.">
             <div className="space-y-6">
                 {error ? (
                     <Alert className="border-red-200 bg-red-50 text-red-800">
@@ -107,52 +153,85 @@ export default function DocumentDetailPage() {
                 ) : null}
 
                 {loading ? (
-                    <div className="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">Loading document detail...</div>
+                    <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-500">
+                        <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                        Memuat detail dokumen...
+                    </div>
                 ) : null}
 
-                {!loading && eligibility ? (
-                    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[2fr_1fr]">
-                        <Card className="rounded-lg border-blue-100 bg-white shadow-sm">
+                {!loading && eligibility && detail ? (
+                    <div className="grid grid-cols-1 gap-6 xl:grid-cols-[1.55fr_1fr]">
+                        <Card className="rounded-xl border-blue-100 bg-white shadow-sm">
                             <CardHeader>
-                                <CardTitle>Document Preview</CardTitle>
-                                <CardDescription>
-                                    Document ID: {eligibility.document.id}
-                                </CardDescription>
+                                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                    <div>
+                                        <CardTitle>Preview Dokumen</CardTitle>
+                                        <CardDescription>
+                                            {detail.document.originalFileName ?? detail.document.finalFileName ?? 'Dokumen sertifikasi'}
+                                        </CardDescription>
+                                    </div>
+                                    <Badge variant={getDocumentBadgeVariant(detail.document.status)}>
+                                        {getDocumentStatusLabel(detail.document.status)}
+                                    </Badge>
+                                </div>
                             </CardHeader>
                             <CardContent>
                                 {previewUrl ? (
                                     <iframe src={previewUrl} title="Document preview" className="h-[680px] w-full rounded-md border border-blue-100" />
                                 ) : (
                                     <div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-                                        Preview unavailable.
+                                        Preview tidak tersedia.
                                     </div>
                                 )}
                             </CardContent>
                         </Card>
 
                         <div className="space-y-6">
-                            <Card className="rounded-lg border-blue-100 bg-white shadow-sm">
+                            <Card className="rounded-xl border-blue-100 bg-white shadow-sm">
                                 <CardHeader>
                                     <CardTitle>Status Dokumen</CardTitle>
-                                    <CardDescription>Gunakan tombol lanjut sesuai kondisi dokumen.</CardDescription>
+                                    <CardDescription>Ringkasan posisi dokumen saat ini.</CardDescription>
                                 </CardHeader>
                                 <CardContent className="space-y-3 text-sm">
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-slate-600">Document status</span>
-                                        <Badge variant={eligibility.canSignCertification ? 'warning' : 'default'}>
-                                            {eligibility.document.status}
+                                    <div className="flex items-center justify-between gap-3">
+                                        <span className="text-slate-600">Status</span>
+                                        <Badge variant={getDocumentBadgeVariant(detail.document.status)}>
+                                            {getDocumentStatusLabel(detail.document.status)}
                                         </Badge>
                                     </div>
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-slate-600">Can sign now</span>
-                                        <span className="font-medium text-slate-900">{String(eligibility.canSignCertification)}</span>
+                                    <div className="flex items-center justify-between gap-3">
+                                        <span className="text-slate-600">Tanda tangan</span>
+                                        <span className="font-semibold text-slate-900">
+                                            {detail.document.signatureCount}/{detail.document.requiredSignerCount}
+                                        </span>
                                     </div>
-                                    <div className="flex items-center justify-between">
-                                        <span className="text-slate-600">Can start cert</span>
-                                        <span className="font-medium text-slate-900">{String(eligibility.canStartCertification)}</span>
+                                    <div className="flex items-center justify-between gap-3">
+                                        <span className="text-slate-600">QR verifikasi</span>
+                                        <span className="font-semibold text-slate-900">
+                                            {detail.document.hasVerificationQr ? 'Sudah ditempatkan' : 'Belum ditempatkan'}
+                                        </span>
                                     </div>
+                                    <div className="flex items-center justify-between gap-3">
+                                        <span className="text-slate-600">Terakhir update</span>
+                                        <span className="font-semibold text-slate-900">{formatDateTime(detail.document.updatedAt)}</span>
+                                    </div>
+                                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                                        <p className="text-xs font-bold uppercase text-slate-500">Pemilik Dokumen</p>
+                                        <p className="mt-1 font-semibold text-slate-900">
+                                            {detail.document.owner.fullName ?? detail.document.owner.displayName ?? detail.document.owner.email ?? '-'}
+                                        </p>
+                                        <p className="text-xs text-slate-500">{detail.document.owner.email ?? '-'}</p>
+                                    </div>
+                                    {detail.document.revokeReason ? (
+                                        <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-red-800">
+                                            <p className="text-xs font-bold uppercase">Alasan pencabutan</p>
+                                            <p className="mt-1 text-sm">{detail.document.revokeReason}</p>
+                                            <p className="mt-1 text-xs">{formatDateTime(detail.document.revokedAt)}</p>
+                                        </div>
+                                    ) : null}
                                     <Button
                                         className="mt-3 w-full"
+                                        disabled={!nextStep || detail.document.status === 'REVOKED'}
                                         onClick={() => nextStep && router.push(buildCertificationStepHref(nextStep, eligibility.document.id))}
                                     >
                                         {nextStep === 'signers' ? <Users className="h-4 w-4" /> : null}
@@ -167,26 +246,114 @@ export default function DocumentDetailPage() {
                                 </CardContent>
                             </Card>
 
-                            <Card className="rounded-lg border-blue-100 bg-white shadow-sm">
+                            <Card className="rounded-xl border-blue-100 bg-white shadow-sm">
                                 <CardHeader>
-                                    <CardTitle>Certification Timeline</CardTitle>
-                                    <CardDescription>Progress from upload to completion.</CardDescription>
+                                    <CardTitle>Informasi File</CardTitle>
+                                    <CardDescription>Data ringkas file tanpa menampilkan hash teknis.</CardDescription>
                                 </CardHeader>
-                                <CardContent className="space-y-3">
-                                    {timelineItems.map((item, index) => (
-                                        <div key={item.label} className="flex items-center gap-3">
-                                            <div className={`h-2.5 w-2.5 rounded-full ${item.done ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                                            <div className="flex-1">
-                                                <p className="text-sm font-medium text-slate-800">{item.label}</p>
-                                            </div>
-                                            <span className="text-xs text-slate-500">Step {index + 1}</span>
-                                        </div>
-                                    ))}
+                                <CardContent className="grid gap-3 text-sm sm:grid-cols-2">
+                                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                                        <p className="text-xs font-bold uppercase text-slate-500">File awal</p>
+                                        <p className="mt-1 truncate font-semibold text-slate-900">{detail.document.originalFileName ?? '-'}</p>
+                                        <p className="text-xs text-slate-500">{formatFileSize(detail.document.originalFileSize)}</p>
+                                    </div>
+                                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                                        <p className="text-xs font-bold uppercase text-slate-500">File final</p>
+                                        <p className="mt-1 truncate font-semibold text-slate-900">{detail.document.finalFileName ?? '-'}</p>
+                                        <p className="text-xs text-slate-500">{formatFileSize(detail.document.finalFileSize)}</p>
+                                    </div>
                                 </CardContent>
                             </Card>
+                        </div>
 
+                        <Card className="rounded-xl border-blue-100 bg-white shadow-sm xl:col-span-2">
+                            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                                <div>
+                                    <CardTitle>Proses Tanda Tangan</CardTitle>
+                                    <CardDescription>
+                                        Urutan signer, status tanda tangan, dan alasan penolakan jika ada.
+                                    </CardDescription>
+                                </div>
+                                <Badge variant={declinedSigner ? 'destructive' : signedCount === signingProcess.length && signingProcess.length > 0 ? 'success' : 'warning'}>
+                                    {signedCount}/{signingProcess.length} selesai
+                                </Badge>
+                            </CardHeader>
+                            <CardContent>
+                                {signingProcess.length > 0 ? (
+                                    <div className="space-y-3">
+                                        {signingProcess.map((item, index) => {
+                                            const signerName = getSignerName(item.signer);
+                                            const isSigned = item.status === 'SIGNED';
+                                            const isDeclined = item.status === 'DECLINED' || item.status === 'REJECTED';
+                                            const timestamp = isSigned ? item.signedAt : isDeclined ? item.declinedAt : item.updatedAt;
+
+                                            return (
+                                                <div key={`${item.userId}-${item.order ?? index}`} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                                                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                                        <div className="flex gap-3">
+                                                            <div
+                                                                className={
+                                                                    isSigned
+                                                                        ? 'flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-700'
+                                                                        : isDeclined
+                                                                            ? 'flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-100 text-red-700'
+                                                                            : 'flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700'
+                                                                }
+                                                            >
+                                                                {isSigned ? <CheckCircle2 className="h-5 w-5" /> : isDeclined ? <XCircle className="h-5 w-5" /> : <Clock3 className="h-5 w-5" />}
+                                                            </div>
+                                                            <div className="min-w-0">
+                                                                <div className="flex flex-wrap items-center gap-2">
+                                                                    <p className="font-bold text-slate-900">
+                                                                        {item.order ?? index + 1}. {signerName}
+                                                                    </p>
+                                                                    <Badge variant="neutral">{item.signer.role.replaceAll('_', ' ')}</Badge>
+                                                                    <Badge variant={getSignerBadgeVariant(item.status)}>
+                                                                        {getSignerStatusLabel(item.status)}
+                                                                    </Badge>
+                                                                </div>
+                                                                <p className="mt-1 text-sm text-slate-600">{item.signer.email}</p>
+                                                                <p className="mt-1 text-xs text-slate-500">
+                                                                    {isSigned ? 'Ditandatangani' : isDeclined ? 'Ditolak' : 'Menunggu'}: {formatDateTime(timestamp)}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                        {item.signature ? (
+                                                            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                                                                Signature urutan {item.signature.order}
+                                                            </div>
+                                                        ) : null}
+                                                    </div>
+                                                    {item.declineReason ? (
+                                                        <div className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                                                            <span className="font-bold">Alasan penolakan:</span> {item.declineReason}
+                                                        </div>
+                                                    ) : null}
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                ) : (
+                                    <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+                                        <FileText className="mx-auto h-8 w-8 text-slate-400" />
+                                        <p className="mt-3 font-bold text-slate-900">Signer belum ditentukan</p>
+                                        <p className="mt-1 text-sm text-slate-600">
+                                            Tambahkan signer terlebih dahulu agar proses tanda tangan bisa dipantau.
+                                        </p>
+                                        <Button asChild className="mt-4 rounded-xl bg-blue-600 font-semibold text-white hover:bg-blue-700">
+                                            <Link href={buildCertificationStepHref('signers', detail.document.id)}>
+                                                <UserCheck className="mr-2 h-4 w-4" />
+                                                Tambah Signer
+                                            </Link>
+                                        </Button>
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
+
+                        <div className="xl:col-span-2">
                             <Button onClick={() => window.history.back()} variant="outline" className="border-slate-300">
-                                Back
+                                Kembali
                             </Button>
                         </div>
                     </div>

@@ -18,9 +18,17 @@ import {
     DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { getIdentityKtpFile, getUser, listAdminIdentities, reviewAdminIdentity } from '@/lib/auth-service';
+import {
+    getIdentityChangeRequestKtpFile,
+    getIdentityKtpFile,
+    getUser,
+    listAdminIdentities,
+    listIdentityChangeRequests,
+    reviewAdminIdentity,
+    reviewIdentityChangeRequest,
+} from '@/lib/auth-service';
 import { normalizeErrorMessage } from '@/lib/certification-flow';
-import type { AdminIdentitiesResponse, IdentityStatus } from '@/types/auth';
+import type { AdminIdentitiesResponse, IdentityChangeRequestItem, IdentityStatus } from '@/types/auth';
 
 type AdminIdentity = AdminIdentitiesResponse['identities'][number];
 type ReviewDialogState = {
@@ -32,6 +40,14 @@ type KtpDialogState = {
     url: string;
 } | null;
 type ReReviewDialogState = AdminIdentity | null;
+type ChangeRequestReviewDialogState = {
+    request: IdentityChangeRequestItem;
+    status: 'APPROVED' | 'REJECTED';
+} | null;
+type ChangeRequestKtpDialogState = {
+    request: IdentityChangeRequestItem;
+    url: string;
+} | null;
 
 const identityStatuses: Array<IdentityStatus | 'ALL'> = ['ALL', 'PENDING', 'APPROVED', 'REJECTED'];
 const pageSize = 8;
@@ -40,16 +56,21 @@ export default function AdminIdentitiesPage() {
     const router = useRouter();
     const currentUser = useMemo(() => getUser(), []);
     const [identities, setIdentities] = useState<AdminIdentity[]>([]);
+    const [changeRequests, setChangeRequests] = useState<IdentityChangeRequestItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [reviewingUserId, setReviewingUserId] = useState('');
+    const [reviewingRequestId, setReviewingRequestId] = useState('');
     const [viewingKtpUserId, setViewingKtpUserId] = useState('');
+    const [viewingRequestId, setViewingRequestId] = useState('');
     const [filter, setFilter] = useState<IdentityStatus | 'ALL'>('ALL');
     const [query, setQuery] = useState('');
     const [page, setPage] = useState(1);
     const [reviewDialog, setReviewDialog] = useState<ReviewDialogState>(null);
+    const [changeRequestReviewDialog, setChangeRequestReviewDialog] = useState<ChangeRequestReviewDialogState>(null);
     const [reReviewDialog, setReReviewDialog] = useState<ReReviewDialogState>(null);
     const [rejectReason, setRejectReason] = useState('');
     const [ktpDialog, setKtpDialog] = useState<KtpDialogState>(null);
+    const [changeRequestKtpDialog, setChangeRequestKtpDialog] = useState<ChangeRequestKtpDialogState>(null);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
 
@@ -73,8 +94,12 @@ export default function AdminIdentitiesPage() {
     }, [filter, query]);
 
     const refreshData = async () => {
-        const response = await listAdminIdentities();
+        const [response, requests] = await Promise.all([
+            listAdminIdentities(),
+            listIdentityChangeRequests(),
+        ]);
         setIdentities(response.identities);
+        setChangeRequests(requests);
     };
 
     useEffect(() => {
@@ -101,8 +126,11 @@ export default function AdminIdentitiesPage() {
             if (ktpDialog?.url) {
                 URL.revokeObjectURL(ktpDialog.url);
             }
+            if (changeRequestKtpDialog?.url) {
+                URL.revokeObjectURL(changeRequestKtpDialog.url);
+            }
         };
-    }, [ktpDialog?.url]);
+    }, [changeRequestKtpDialog?.url, ktpDialog?.url]);
 
     const openReviewDialog = (identity: AdminIdentity, status: 'APPROVED' | 'REJECTED') => {
         setRejectReason('');
@@ -114,6 +142,13 @@ export default function AdminIdentitiesPage() {
             URL.revokeObjectURL(ktpDialog.url);
         }
         setKtpDialog(null);
+    };
+
+    const closeChangeRequestKtpDialog = () => {
+        if (changeRequestKtpDialog?.url) {
+            URL.revokeObjectURL(changeRequestKtpDialog.url);
+        }
+        setChangeRequestKtpDialog(null);
     };
 
     const handleReview = async () => {
@@ -143,6 +178,38 @@ export default function AdminIdentitiesPage() {
         }
     };
 
+    const openChangeRequestReviewDialog = (request: IdentityChangeRequestItem, status: 'APPROVED' | 'REJECTED') => {
+        setRejectReason('');
+        setChangeRequestReviewDialog({ request, status });
+    };
+
+    const handleReviewChangeRequest = async () => {
+        if (!changeRequestReviewDialog) {
+            return;
+        }
+
+        const { request, status } = changeRequestReviewDialog;
+        setError('');
+        setSuccess('');
+        setReviewingRequestId(request.id);
+        try {
+            const result = await reviewIdentityChangeRequest(request.id, {
+                status,
+                ...(status === 'REJECTED' && {
+                    rejectionReason: rejectReason.trim() || 'Data perubahan identitas tidak valid',
+                }),
+            });
+            setSuccess(result.message);
+            setChangeRequestReviewDialog(null);
+            setRejectReason('');
+            await refreshData();
+        } catch (err) {
+            setError(normalizeErrorMessage(err));
+        } finally {
+            setReviewingRequestId('');
+        }
+    };
+
     const handleOpenKtp = async (identity: AdminIdentity) => {
         setError('');
         setViewingKtpUserId(identity.userId);
@@ -157,6 +224,23 @@ export default function AdminIdentitiesPage() {
             setError(normalizeErrorMessage(err));
         } finally {
             setViewingKtpUserId('');
+        }
+    };
+
+    const handleOpenChangeRequestKtp = async (request: IdentityChangeRequestItem) => {
+        setError('');
+        setViewingRequestId(request.id);
+        try {
+            const file = await getIdentityChangeRequestKtpFile(request.id);
+            const url = URL.createObjectURL(file);
+            if (changeRequestKtpDialog?.url) {
+                URL.revokeObjectURL(changeRequestKtpDialog.url);
+            }
+            setChangeRequestKtpDialog({ request, url });
+        } catch (err) {
+            setError(normalizeErrorMessage(err));
+        } finally {
+            setViewingRequestId('');
         }
     };
 
@@ -216,6 +300,85 @@ export default function AdminIdentitiesPage() {
                         );
                     })}
                 </div>
+
+                <Card className="overflow-hidden rounded-2xl border border-amber-200/70 bg-white/80 backdrop-blur-md shadow-lg shadow-amber-100/30">
+                    <CardHeader className="border-b border-amber-100/70 pb-5">
+                        <CardTitle className="flex items-center gap-2 text-xl font-bold text-slate-900">
+                            <RotateCcw className="h-5.5 w-5.5 text-amber-600" />
+                            Request Perubahan Identitas
+                        </CardTitle>
+                        <CardDescription className="text-slate-500 text-xs">
+                            Perubahan data KTP yang sudah terverifikasi harus dicek ulang sebelum mengganti data final user.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="p-0">
+                        {changeRequests.length === 0 ? (
+                            <div className="px-5 py-8 text-center text-sm font-medium text-slate-400">
+                                Tidak ada request perubahan identitas yang menunggu review.
+                            </div>
+                        ) : (
+                            <div className="overflow-x-auto">
+                                <table className="w-full min-w-[1100px] text-left text-sm">
+                                    <thead className="border-b border-amber-100 bg-amber-50/50 text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                                        <tr>
+                                            <th className="px-5 py-3.5">User</th>
+                                            <th className="px-5 py-3.5">Data Saat Ini</th>
+                                            <th className="px-5 py-3.5">Data Diajukan</th>
+                                            <th className="px-5 py-3.5">Tanggal Request</th>
+                                            <th className="px-5 py-3.5 text-right">Aksi</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-amber-100/70">
+                                        {changeRequests.map((request) => (
+                                            <tr key={request.id} className="hover:bg-amber-50/30">
+                                                <td className="px-5 py-4">
+                                                    <p className="font-semibold text-slate-900">{request.user.identity?.fullName ?? request.user.displayName ?? '-'}</p>
+                                                    <p className="mt-1 text-xs text-slate-500">{request.user.email}</p>
+                                                </td>
+                                                <td className="px-5 py-4 text-xs text-slate-600">
+                                                    <p className="font-semibold text-slate-800">{request.user.identity?.fullName ?? '-'}</p>
+                                                    <p className="mt-1 font-mono text-[10px]">NIK {request.user.identity?.nik ?? '-'}</p>
+                                                    <p className="mt-1">{request.user.identity?.birthPlace ?? '-'}, {request.user.identity?.birthDate ? new Date(request.user.identity.birthDate).toLocaleDateString('id-ID', { dateStyle: 'medium' }) : '-'}</p>
+                                                </td>
+                                                <td className="px-5 py-4 text-xs text-slate-600">
+                                                    <p className="font-semibold text-slate-800">{request.fullName}</p>
+                                                    <p className="mt-1 font-mono text-[10px]">NIK {request.nik}</p>
+                                                    <p className="mt-1">{request.birthPlace ?? '-'}, {new Date(request.birthDate).toLocaleDateString('id-ID', { dateStyle: 'medium' })}</p>
+                                                    <p className="mt-1 text-[10px] text-amber-700">{request.ktpOriginalFileName ? `KTP baru: ${request.ktpOriginalFileName}` : 'Menggunakan KTP tersimpan'}</p>
+                                                </td>
+                                                <td className="px-5 py-4 text-xs font-medium text-slate-500">
+                                                    {new Date(request.createdAt).toLocaleDateString('id-ID', { dateStyle: 'medium' })}
+                                                </td>
+                                                <td className="px-5 py-4">
+                                                    <div className="flex justify-end gap-1.5">
+                                                        <Button
+                                                            size="sm"
+                                                            variant="outline"
+                                                            className="h-8 rounded-lg border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-700 hover:bg-amber-50"
+                                                            onClick={() => void handleOpenChangeRequestKtp(request)}
+                                                            disabled={viewingRequestId === request.id}
+                                                        >
+                                                            {viewingRequestId === request.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                                                            KTP
+                                                        </Button>
+                                                        <Button size="sm" onClick={() => openChangeRequestReviewDialog(request, 'APPROVED')} disabled={reviewingRequestId === request.id} className="h-8 rounded-lg bg-emerald-600 text-xs font-bold text-white hover:bg-emerald-500">
+                                                            {reviewingRequestId === request.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                                                            Approve
+                                                        </Button>
+                                                        <Button size="sm" variant="destructive" onClick={() => openChangeRequestReviewDialog(request, 'REJECTED')} disabled={reviewingRequestId === request.id} className="h-8 rounded-lg bg-red-600 text-xs font-bold text-white hover:bg-red-500">
+                                                            {reviewingRequestId === request.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5" />}
+                                                            Reject
+                                                        </Button>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+                    </CardContent>
+                </Card>
 
                 <Card className="overflow-hidden rounded-2xl border border-slate-200/60 bg-white/70 backdrop-blur-md shadow-lg shadow-slate-100/50">
                     <CardHeader className="border-b border-slate-100/60 pb-5">
@@ -349,6 +512,31 @@ export default function AdminIdentitiesPage() {
                     </DialogContent>
                 </Dialog>
 
+                <Dialog open={Boolean(changeRequestKtpDialog)} onOpenChange={(open) => !open && closeChangeRequestKtpDialog()}>
+                    <DialogContent className="max-h-[88vh] max-w-[min(92vw,760px)] overflow-hidden rounded-2xl p-0">
+                        <DialogHeader className="border-b border-slate-200 px-5 py-4">
+                            <DialogTitle>Preview KTP Request Perubahan</DialogTitle>
+                            <DialogDescription>
+                                {changeRequestKtpDialog?.request.fullName ?? '-'} | NIK {changeRequestKtpDialog?.request.nik ?? '-'}
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="max-h-[68vh] overflow-auto bg-slate-950 p-4">
+                            {changeRequestKtpDialog?.url ? (
+                                <img
+                                    src={changeRequestKtpDialog.url}
+                                    alt={`KTP ${changeRequestKtpDialog.request.fullName}`}
+                                    className="mx-auto max-h-[64vh] w-auto max-w-full rounded-lg bg-white object-contain"
+                                />
+                            ) : null}
+                        </div>
+                        <DialogFooter className="border-t border-slate-200 px-5 py-4">
+                            <Button variant="outline" className="border-slate-300" onClick={closeChangeRequestKtpDialog}>
+                                Tutup
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
                 <Dialog open={Boolean(reReviewDialog)} onOpenChange={(open) => !open && setReReviewDialog(null)}>
                     <DialogContent className="w-[min(92vw,520px)] rounded-2xl">
                         <DialogHeader>
@@ -450,6 +638,62 @@ export default function AdminIdentitiesPage() {
                             >
                                 {reviewDialog && reviewingUserId === reviewDialog.identity.userId ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                                 Ya, {reviewDialog?.status === 'APPROVED' ? 'Approve' : 'Reject'}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
+
+                <Dialog open={Boolean(changeRequestReviewDialog)} onOpenChange={(open) => !open && setChangeRequestReviewDialog(null)}>
+                    <DialogContent className="w-[min(92vw,560px)] rounded-2xl">
+                        <DialogHeader>
+                            <DialogTitle>
+                                {changeRequestReviewDialog?.status === 'APPROVED' ? 'Konfirmasi Approve Perubahan Identitas' : 'Konfirmasi Reject Perubahan Identitas'}
+                            </DialogTitle>
+                            <DialogDescription>
+                                {changeRequestReviewDialog?.status === 'APPROVED'
+                                    ? 'Pastikan data baru sudah sesuai dengan KTP sebelum mengganti data identitas final user.'
+                                    : 'Tuliskan alasan penolakan agar user memahami data yang perlu diperbaiki.'}
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        <div className="grid gap-3 text-sm md:grid-cols-2">
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Data Saat Ini</p>
+                                <p className="mt-2 font-semibold text-slate-900">{changeRequestReviewDialog?.request.user.identity?.fullName ?? '-'}</p>
+                                <p className="mt-1 text-xs text-slate-600">NIK {changeRequestReviewDialog?.request.user.identity?.nik ?? '-'}</p>
+                                <p className="mt-1 text-xs text-slate-500">{changeRequestReviewDialog?.request.user.email ?? '-'}</p>
+                            </div>
+                            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                                <p className="text-[10px] font-bold uppercase tracking-wider text-amber-700">Data Diajukan</p>
+                                <p className="mt-2 font-semibold text-slate-900">{changeRequestReviewDialog?.request.fullName ?? '-'}</p>
+                                <p className="mt-1 text-xs text-slate-600">NIK {changeRequestReviewDialog?.request.nik ?? '-'}</p>
+                                <p className="mt-1 text-xs text-slate-500">{changeRequestReviewDialog?.request.birthPlace ?? '-'}, {changeRequestReviewDialog?.request.birthDate ? new Date(changeRequestReviewDialog.request.birthDate).toLocaleDateString('id-ID', { dateStyle: 'medium' }) : '-'}</p>
+                            </div>
+                        </div>
+
+                        {changeRequestReviewDialog?.status === 'REJECTED' ? (
+                            <div className="space-y-1.5">
+                                <label className="text-xs font-medium text-slate-600">Alasan penolakan</label>
+                                <textarea
+                                    value={rejectReason}
+                                    onChange={(event) => setRejectReason(event.target.value)}
+                                    placeholder="Contoh: Perubahan nama tidak sesuai dengan foto KTP terbaru."
+                                    className="min-h-28 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                                />
+                            </div>
+                        ) : null}
+
+                        <DialogFooter>
+                            <Button variant="outline" className="border-slate-300" onClick={() => setChangeRequestReviewDialog(null)}>
+                                Tidak
+                            </Button>
+                            <Button
+                                variant={changeRequestReviewDialog?.status === 'REJECTED' ? 'destructive' : 'default'}
+                                onClick={() => void handleReviewChangeRequest()}
+                                disabled={Boolean(changeRequestReviewDialog && reviewingRequestId === changeRequestReviewDialog.request.id) || (changeRequestReviewDialog?.status === 'REJECTED' && rejectReason.trim().length < 5)}
+                            >
+                                {changeRequestReviewDialog && reviewingRequestId === changeRequestReviewDialog.request.id ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                                Ya, {changeRequestReviewDialog?.status === 'APPROVED' ? 'Approve' : 'Reject'}
                             </Button>
                         </DialogFooter>
                     </DialogContent>

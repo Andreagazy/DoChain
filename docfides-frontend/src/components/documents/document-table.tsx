@@ -59,10 +59,12 @@ export function DocumentTable({
                                                 <FileText className="h-4.5 w-4.5" />
                                             </div>
                                             <div className="max-w-[280px]">
-                                                <p className="truncate font-semibold text-slate-900 leading-tight group-hover:text-indigo-950 transition-colors" title={doc.originalFileName ?? doc.id}>
-                                                    {doc.originalFileName ?? doc.id}
+                                                <p className="truncate font-semibold text-slate-900 leading-tight group-hover:text-indigo-950 transition-colors" title={doc.originalFileName ?? doc.finalFileName ?? 'Dokumen PDF'}>
+                                                    {doc.originalFileName ?? doc.finalFileName ?? 'Dokumen PDF'}
                                                 </p>
-                                                <p className="mt-1 truncate font-mono text-[10px] text-slate-400">ID: {doc.id.substring(0, 12)}...</p>
+                                                <p className="mt-1 text-xs text-slate-500">
+                                                    {doc.hasVerificationQr ? 'QR verifikasi tersedia' : 'QR verifikasi belum ada'}
+                                                </p>
                                             </div>
                                         </div>
                                     </td>

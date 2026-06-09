@@ -28,6 +28,11 @@ import {
 } from '@/lib/certification-flow';
 import type { OwnedDocumentItem, User } from '@/types/auth';
 
+const getStoredSignerName = (signer: { fullName?: string | null; displayName?: string | null; email?: string | null; userId: string }) =>
+    signer.fullName ?? signer.displayName ?? signer.email ?? 'Signer';
+
+const DEFAULT_QR_CODE_SIZE = 48;
+
 function CertificationReviewContent() {
     const router = useRouter();
     const searchParams = useSearchParams();
@@ -42,7 +47,7 @@ function CertificationReviewContent() {
     const [hasSignature, setHasSignature] = useState(false);
     const [myDocuments, setMyDocuments] = useState<OwnedDocumentItem[]>([]);
     const [selectedDocumentId, setSelectedDocumentId] = useState('');
-    const signingReason = 'DoChain digital signature';
+    const signingReason = 'DOCChain digital signature';
     const [signerDetailsLoading, setSignerDetailsLoading] = useState(false);
     const [documentSignerDetails, setDocumentSignerDetails] = useState<Awaited<ReturnType<typeof getDocumentSignerPlaceholders>> | null>(null);
     const [selectedDocumentPreviewUrl, setSelectedDocumentPreviewUrl] = useState('');
@@ -77,6 +82,8 @@ function CertificationReviewContent() {
         (selectedDocument.signatureCount ?? 0) === 0 &&
         ['DRAFT', 'PENDING_SIGNATURES'].includes(selectedDocument.status),
     );
+    const shouldShowQrPlacement = canPlaceQrBeforeSigning;
+    const canShowSignAction = Boolean(selectedDocument?.hasVerificationQr) && !shouldShowQrPlacement;
 
     const refreshSelectedDocumentState = async (documentId: string) => {
         const [documents, signerDetails] = await Promise.all([
@@ -115,7 +122,7 @@ function CertificationReviewContent() {
                 ]);
 
                 if (identityStatus.status !== 'APPROVED') {
-                    router.push('/identity');
+                    router.push('/profile#identitas-ktp');
                     return;
                 }
 
@@ -280,9 +287,7 @@ function CertificationReviewContent() {
             }
 
             const unscaledViewport = page.getViewport({ scale: 1 });
-            const maxWidth = previewContainerRef.current.clientWidth > 0 ? Math.min(previewContainerRef.current.clientWidth, 760) : 760;
-            const scale = maxWidth / unscaledViewport.width;
-            const viewport = page.getViewport({ scale });
+            const viewport = page.getViewport({ scale: 1 });
 
             const canvas = previewCanvasRef.current;
             const context = canvas.getContext('2d');
@@ -339,7 +344,7 @@ function CertificationReviewContent() {
         };
     }, [previewPage, qrCodePlacement, renderedPageSize]);
 
-    const handleQrPickPosition = (event: MouseEvent<HTMLDivElement>) => {
+    const handleQrPickPosition = (event: MouseEvent<HTMLCanvasElement>) => {
         if (!canPlaceQrBeforeSigning) {
             setError('QR verifikasi hanya dapat ditempatkan sebelum tanda tangan pertama.');
             return;
@@ -360,8 +365,8 @@ function CertificationReviewContent() {
             visiblePage: previewPage,
             visibleX: 36,
             visibleY: 36,
-            visibleWidth: 96,
-            visibleHeight: 96,
+            visibleWidth: DEFAULT_QR_CODE_SIZE,
+            visibleHeight: DEFAULT_QR_CODE_SIZE,
         };
         const width = currentConfig.visibleWidth;
         const height = currentConfig.visibleHeight;
@@ -479,8 +484,8 @@ function CertificationReviewContent() {
     }
 
     return (
-        <AppShell title="Certification - Review" subtitle="Langkah terakhir: review hasil pengaturan lalu lanjut ke tanda tangan.">
-            <div className="space-y-6">
+        <AppShell title="Sertifikasi - Review" subtitle="Langkah terakhir: letakkan QR, tinjau konfigurasi, lalu tanda tangani.">
+            <div className="flex flex-col gap-6">
                 <CertificationStepper currentStep="review" documentId={selectedDocumentId} />
 
                 {error ? (
@@ -496,7 +501,15 @@ function CertificationReviewContent() {
                     </Alert>
                 ) : null}
 
-                <Card className="rounded-lg border-blue-100 bg-white shadow-sm">
+                <section className="rounded-2xl border border-blue-100 bg-blue-50 p-6 shadow-sm">
+                    <Badge className="rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-bold uppercase tracking-wide text-blue-700 hover:bg-white">Review Sertifikasi</Badge>
+                    <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-950 md:text-3xl">Tinjau dokumen sebelum tanda tangan.</h1>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
+                        Lokasi QR harus disimpan terlebih dahulu. Setelah itu, lanjutkan tanda tangan sesuai status signer.
+                    </p>
+                </section>
+
+                <Card className={`rounded-2xl border-blue-100 bg-white shadow-sm ${shouldShowQrPlacement ? 'order-2' : ''}`}>
                     <CardHeader>
                         <CardTitle>Detail Dokumen</CardTitle>
                         <CardDescription>Ringkasan dokumen dan status penandatanganan sebelum melanjutkan sign.</CardDescription>
@@ -506,7 +519,6 @@ function CertificationReviewContent() {
                             <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
                                 <p className="text-xs uppercase tracking-wide text-slate-500">Dokumen</p>
                                 <p className="mt-1 font-semibold text-slate-900">{selectedDocument?.originalFileName ?? selectedDocument?.id ?? '-'}</p>
-                                <p className="mt-1 text-xs text-slate-500">ID: {selectedDocument?.id ?? '-'}</p>
                             </div>
                             <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
                                 <p className="text-xs uppercase tracking-wide text-slate-500">Status Dokumen</p>
@@ -534,8 +546,8 @@ function CertificationReviewContent() {
                                     {documentSignerDetails.signers.map((signer, index) => (
                                         <div key={`${signer.userId}-${signer.order ?? index}`} className="flex flex-col gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 md:flex-row md:items-center md:justify-between">
                                             <div>
-                                                <p className="text-sm font-medium text-slate-900">Urutan {signer.order ?? index + 1}: {signer.displayName ?? signer.email ?? signer.userId}</p>
-                                                <p className="text-xs text-slate-500">{signer.email ?? signer.userId}</p>
+                                                <p className="text-sm font-medium text-slate-900">Urutan {signer.order ?? index + 1}: {getStoredSignerName(signer)}</p>
+                                                <p className="text-xs text-slate-500">{signer.email ?? '-'}</p>
                                             </div>
                                             <Badge variant={signer.status === 'SIGNED' ? 'success' : signer.status === 'PENDING' ? 'warning' : 'neutral'}>{signer.status}</Badge>
                                         </div>
@@ -555,8 +567,12 @@ function CertificationReviewContent() {
                                 <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
                                     Semua signer sudah selesai. Dokumen final sudah tersimpan.
                                 </div>
+                            ) : shouldShowQrPlacement ? (
+                                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800">
+                                    Pilih dan simpan lokasi QR verifikasi terlebih dahulu. Setelah QR tersimpan, tombol sign akan muncul.
+                                </div>
                             ) : (
-                                <Button onClick={handleOwnerSign} disabled={loadingAction !== '' || !selectedDocumentId}>
+                                <Button className="rounded-xl bg-blue-600 font-semibold text-white hover:bg-blue-700" onClick={handleOwnerSign} disabled={loadingAction !== '' || !canShowSignAction}>
                                     {loadingAction === 'Sign Dokumen' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PenLine className="mr-2 h-4 w-4" />}
                                     Sign Dokumen Terpilih
                                 </Button>
@@ -566,7 +582,7 @@ function CertificationReviewContent() {
                 </Card>
 
                 {canPlaceQrBeforeSigning ? (
-                    <Card className="rounded-lg border-blue-100 bg-white shadow-sm">
+                    <Card className="order-1 rounded-2xl border-blue-100 bg-white shadow-sm">
                         <CardHeader>
                             <CardTitle className="flex items-center gap-2">
                                 <QrCode className="h-5 w-5 text-blue-600" />
@@ -593,7 +609,7 @@ function CertificationReviewContent() {
                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                         <div className="flex items-center gap-2 text-sm text-slate-600">
                                             <MapPinned className="h-4 w-4" />
-                                            <span>Klik halaman PDF untuk menentukan lokasi QR</span>
+                                            <span>Klik halaman PDF ukuran asli untuk menentukan lokasi QR</span>
                                         </div>
                                         <div className="flex items-center gap-2">
                                             {previewPageCount > 0 ? (
@@ -623,11 +639,11 @@ function CertificationReviewContent() {
                                     </div>
 
                                     <div ref={previewContainerRef} className="max-h-[70vh] w-full overflow-auto rounded-md border border-slate-200 bg-slate-50 p-2">
-                                        <div className="relative mx-auto inline-block cursor-crosshair" onClick={handleQrPickPosition}>
-                                            <canvas ref={previewCanvasRef} className="block rounded-md bg-white shadow-sm" />
+                                        <div className="relative mx-auto inline-block">
+                                            <canvas ref={previewCanvasRef} className="block cursor-crosshair rounded-md bg-white shadow-sm" onClick={handleQrPickPosition} />
                                             {qrOverlayBox ? (
                                                 <div
-                                                    className="absolute border-2 border-blue-600 bg-blue-100/30"
+                                                    className="pointer-events-none absolute border-2 border-blue-600 bg-blue-100/30"
                                                     style={{
                                                         left: `${qrOverlayBox.left}px`,
                                                         top: `${qrOverlayBox.top}px`,
@@ -642,7 +658,7 @@ function CertificationReviewContent() {
                                     </div>
 
                                     <div className="flex flex-wrap items-center gap-2">
-                                        <Button onClick={handleFinalizeQr} disabled={loadingAction !== '' || !qrCodePlacement}>
+                                        <Button className="rounded-xl bg-blue-600 font-semibold text-white hover:bg-blue-700" onClick={handleFinalizeQr} disabled={loadingAction !== '' || !qrCodePlacement}>
                                             {loadingAction === 'Simpan QR' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <QrCode className="mr-2 h-4 w-4" />}
                                             Simpan QR
                                         </Button>

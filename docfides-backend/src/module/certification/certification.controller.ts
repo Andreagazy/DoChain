@@ -90,6 +90,17 @@ export class CertificationController {
     return this.certificationService.listAssignedDocuments(req.user.userId);
   }
 
+  @Get('documents/:documentId')
+  async getDocumentDetail(
+    @Req() req: RequestWithUser,
+    @Param('documentId') documentId: string,
+  ) {
+    return this.certificationService.getDocumentDetail(
+      req.user.userId,
+      documentId,
+    );
+  }
+
   @Get('documents/:documentId/file')
   async getDocumentFile(
     @Req() req: RequestWithUser,
@@ -166,6 +177,23 @@ export class CertificationController {
   @Get('signature/me')
   async getSignatureStatus(@Req() req: RequestWithUser) {
     return this.certificationService.getSignatureStatus(req.user.userId);
+  }
+
+  @Get('signature/file')
+  async getSignatureImageFile(
+    @Req() req: RequestWithUser,
+    @Res() res: Response,
+  ) {
+    const file = this.certificationService.getSignatureImageFile(
+      req.user.userId,
+    );
+
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${file.fileName}"`,
+    );
+    res.send(file.content);
   }
 
   @Get('ipfs/status')

@@ -3,8 +3,10 @@
 import Link from 'next/link';
 import { Building2, ClipboardList, FileSignature, FolderOpen, Inbox, LayoutDashboard, LogOut, PenSquare, ShieldCheck, UserCircle, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { getUser, logout } from '@/lib/auth-service';
+import { getProfile, getUser, logout, saveAuthData, getToken } from '@/lib/auth-service';
 import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import type { User } from '@/types/auth';
 
 interface AppTopbarProps {
     title: string;
@@ -20,7 +22,31 @@ function getActiveHref(pathname: string, items: Array<{ href: string }>) {
 export function AppTopbar({ title, subtitle }: AppTopbarProps) {
     const router = useRouter();
     const pathname = usePathname();
-    const user = getUser();
+    const [user, setUser] = useState<User | null>(null);
+
+    useEffect(() => {
+        const storedUser = getUser();
+        setUser(storedUser);
+
+        const token = getToken();
+        if (!token) return;
+
+        let ignore = false;
+
+        void getProfile()
+            .then((profile) => {
+                if (ignore) return;
+                setUser(profile);
+                saveAuthData(token, profile);
+            })
+            .catch(() => {
+                if (!ignore) setUser(storedUser);
+            });
+
+        return () => {
+            ignore = true;
+        };
+    }, []);
 
     const handleLogout = () => {
         logout();
@@ -32,7 +58,6 @@ export function AppTopbar({ title, subtitle }: AppTopbarProps) {
         { href: '/documents', label: 'Dokumen', icon: FolderOpen },
         { href: '/certification', label: 'Sertifikasi', icon: PenSquare },
         { href: '/certification/assigned', label: 'Perlu Sign', icon: Inbox },
-        { href: '/identity', label: 'Identitas', icon: ShieldCheck },
         { href: '/signature-setup', label: 'Tanda Tangan', icon: FileSignature },
         { href: '/profile', label: 'Profil', icon: UserCircle },
     ];
@@ -61,6 +86,7 @@ export function AppTopbar({ title, subtitle }: AppTopbarProps) {
             ? adminProdiMobileItems
             : userMobileItems;
     const activeHref = getActiveHref(pathname, mobileItems);
+    const profileName = user?.identity?.fullName || user?.displayName || user?.email || 'User';
 
     return (
         <header className="sticky top-0 z-20 border-b border-slate-200/50 bg-white/70 backdrop-blur-md px-4 py-3.5 md:px-6 lg:px-8">
@@ -80,7 +106,7 @@ export function AppTopbar({ title, subtitle }: AppTopbarProps) {
                         </div>
                         <div className="hidden min-w-0 sm:block">
                             <p className="max-w-40 truncate text-xs font-bold text-slate-800">
-                                {user?.displayName || user?.email || 'User'}
+                                {profileName}
                             </p>
                             <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                                 {user?.role?.replace(/_/g, ' ') ?? 'Profil'}

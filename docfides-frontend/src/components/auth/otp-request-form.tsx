@@ -82,7 +82,7 @@ export default function OtpRequestForm({ onOtpRequested }: OtpRequestFormProps) 
                     Buat Akun Baru
                 </CardTitle>
                 <CardDescription className="text-slate-500 mt-1">
-                    Masukkan email aktif Anda untuk memulai proses pendaftaran platform DoChain.
+                    Masukkan email aktif Anda untuk memulai proses pendaftaran platform DOCChain.
                 </CardDescription>
             </CardHeader>
 

@@ -29,7 +29,13 @@ export interface User {
   role: UserRole;
   displayName?: string | null;
   identityStatus?: IdentityStatus | null;
+  identity?: {
+    status: IdentityStatus;
+    fullName?: string | null;
+    nik?: string | null;
+  } | null;
   academicProfile?: AcademicProfile | null;
+  pendingAcademicProfileChangeRequest?: AcademicProfileChangeRequestSummary | null;
 }
 
 export type UserRole =
@@ -43,6 +49,7 @@ export type UserRole =
 export interface AcademicProfile {
   type: 'STUDENT' | 'EMPLOYEE';
   identifier?: string | null;
+  unitId?: string | null;
   unitCode: string;
   unitName: string;
   unitType: 'JURUSAN' | 'PRODI';
@@ -59,6 +66,27 @@ export interface AcademicProfile {
       type: 'JURUSAN' | 'PRODI';
     };
   }>;
+}
+
+export interface AcademicProfileChangePayload {
+  nim: string;
+  prodiId: string;
+  angkatan?: number | null;
+  kelas?: string | null;
+}
+
+export interface AcademicProfileChangeRequestSummary {
+  id: string;
+  nim: string;
+  angkatan: number | null;
+  kelas: string | null;
+  status: 'PENDING';
+  createdAt: string;
+  prodi: {
+    id: string;
+    code: string;
+    name: string;
+  };
 }
 
 export type IdentityStatus =
@@ -91,6 +119,18 @@ export interface IdentityProfileResponse {
   verifiedBy?: string | null;
   verifiedAt?: string | null;
   updatedAt?: string;
+  pendingChangeRequest?: {
+    id: string;
+    nik: string;
+    fullName: string;
+    birthPlace?: string | null;
+    birthDate: string;
+    address: string;
+    ktpOriginalFileName?: string | null;
+    status: 'PENDING';
+    createdAt: string;
+    updatedAt: string;
+  } | null;
 }
 
 export interface SubmitIdentityDto {
@@ -184,6 +224,8 @@ export interface RequestSignersResponse {
     userId: string;
     email: string | null;
     displayName: string | null;
+    fullName?: string | null;
+    certificateName?: string | null;
     role?: UserRole | null;
     signerLevel?: number | null;
     academicProfile?: AcademicProfile | null;
@@ -209,6 +251,7 @@ export interface DocumentSignerPlaceholdersResponse {
     status: string;
     email: string | null;
     displayName: string | null;
+    fullName?: string | null;
     placeholder: {
       visiblePage: number | null;
       visibleX: number | null;
@@ -282,6 +325,61 @@ export interface OwnedDocumentsResponse {
   documents: OwnedDocumentItem[];
 }
 
+export interface CertificationDocumentDetailResponse {
+  document: {
+    id: string;
+    status: string;
+    originalFileName: string | null;
+    finalFileName: string | null;
+    originalFileSize: number | null;
+    finalFileSize: number | null;
+    hasVerificationQr: boolean;
+    revokedAt: string | null;
+    revokeReason: string | null;
+    createdAt: string;
+    updatedAt: string;
+    owner: {
+      email: string | null;
+      displayName: string | null;
+      fullName: string | null;
+    };
+    requiredSignerCount: number;
+    signatureCount: number;
+  };
+  signingProcess: Array<{
+    userId: string;
+    order: number | null;
+    status: string;
+    signedAt: string | null;
+    declinedAt: string | null;
+    declineReason: string | null;
+    updatedAt: string;
+    signer: {
+      email: string;
+      displayName: string | null;
+      fullName: string | null;
+      role: UserRole;
+    };
+    signature: {
+      id: string;
+      order: number;
+      signedAt: string;
+    } | null;
+  }>;
+  signatures: Array<{
+    id: string;
+    order: number;
+    signedAt: string;
+    signerId: string;
+    signer: {
+      email: string;
+      displayName: string | null;
+      fullName: string | null;
+      role: UserRole;
+    };
+  }>;
+}
+
 export interface AssignedDocumentItem {
   signerStatus: string;
   order: number | null;
@@ -304,8 +402,10 @@ export interface SignerCandidate {
   id: string;
   email: string;
   displayName: string | null;
+  fullName?: string | null;
+  certificateName?: string | null;
   role: UserRole;
-  signerLevel: number;
+  signerLevel?: number;
   academicProfile?: AcademicProfile | null;
   preferredSignatureMode: SignatureMode;
 }
@@ -346,6 +446,7 @@ export interface SignDocumentResponse {
     finalFileName: string;
     finalFileHash: string;
     finalFileIpfsHash?: string | null;
+    blockchainTxHash?: string | null;
     finalFileSize: number;
     updatedAt: string;
   };
@@ -451,6 +552,7 @@ export interface AdminOverviewResponse {
   };
   identities: {
     pending: number;
+    pendingAcademicProfileChanges?: number;
   };
   documents: {
     total: number;
@@ -459,6 +561,36 @@ export interface AdminOverviewResponse {
     declinedSigners: number;
     byStatus: Array<{ status: string; count: number }>;
   };
+}
+
+export interface AcademicProfileChangeRequestItem {
+  id: string;
+  userId: string;
+  nim: string;
+  angkatan: number | null;
+  kelas: string | null;
+  status: 'PENDING';
+  createdAt: string;
+  updatedAt: string;
+  prodi: AdminAcademicUnit;
+  user: {
+    email: string;
+    displayName: string | null;
+    role: UserRole;
+    identity: {
+      fullName: string;
+    } | null;
+    studentProfile: {
+      nim: string;
+      angkatan: number | null;
+      kelas: string | null;
+      prodi: AdminAcademicUnit;
+    } | null;
+  };
+}
+
+export interface AcademicProfileChangeRequestsResponse {
+  requests: AcademicProfileChangeRequestItem[];
 }
 
 export interface AdminIdentitiesResponse {
@@ -482,6 +614,39 @@ export interface AdminIdentitiesResponse {
       status: 'ACTIVE' | 'SUSPENDED' | 'DISABLED';
     };
   }>;
+}
+
+export interface IdentityChangeRequestItem {
+  id: string;
+  userId: string;
+  nik: string;
+  fullName: string;
+  birthPlace: string | null;
+  birthDate: string;
+  address: string;
+  ktpOriginalFileName: string | null;
+  ktpStoragePath: string | null;
+  status: 'PENDING';
+  createdAt: string;
+  updatedAt: string;
+  user: {
+    email: string;
+    displayName: string | null;
+    role: UserRole;
+    status: 'ACTIVE' | 'SUSPENDED' | 'DISABLED';
+    identity: {
+      nik: string;
+      fullName: string;
+      birthPlace: string | null;
+      birthDate: string;
+      address: string;
+      ktpOriginalFileName: string | null;
+    } | null;
+  };
+}
+
+export interface IdentityChangeRequestsResponse {
+  requests: IdentityChangeRequestItem[];
 }
 
 export interface UpdateAdminUserPayload {
@@ -513,6 +678,23 @@ export interface CreateAdminUserPayload {
   displayName: string;
   role: UserRole;
   password?: string;
+  studentProfile?: {
+    nim: string;
+    prodiId: string;
+    angkatan?: number | null;
+    kelas?: string | null;
+  };
+  employeeProfile?: {
+    nip?: string | null;
+    nidn?: string | null;
+    employeeType: 'DOSEN' | 'TENAGA_KEPENDIDIKAN' | 'ADMINISTRASI';
+    homeUnitId: string;
+    positionTitle?: string | null;
+  };
+  structuralAssignments?: Array<{
+    academicUnitId: string;
+    position: 'KAJUR' | 'KAPRODI' | 'ADMIN_PRODI';
+  }>;
 }
 
 export interface CreateAdminAcademicUnitPayload {

@@ -21,6 +21,7 @@ import { addMinutes } from 'date-fns';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { RegisterDto } from './dto/register.dto';
+import { RequestAcademicProfileChangeDto } from './dto/academic-profile-change.dto';
 
 @Injectable()
 export class AuthService {
@@ -110,6 +111,7 @@ export class AuthService {
             kelas: true,
             prodi: {
               select: {
+                id: true,
                 code: true,
                 name: true,
               },
@@ -124,6 +126,7 @@ export class AuthService {
             positionTitle: true,
             homeUnit: {
               select: {
+                id: true,
                 code: true,
                 name: true,
                 type: true,
@@ -150,6 +153,28 @@ export class AuthService {
         identity: {
           select: {
             status: true,
+            fullName: true,
+            nik: true,
+          },
+        },
+        academicProfileChangeRequests: {
+          where: { status: 'PENDING' },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            id: true,
+            nim: true,
+            angkatan: true,
+            kelas: true,
+            status: true,
+            createdAt: true,
+            prodi: {
+              select: {
+                id: true,
+                code: true,
+                name: true,
+              },
+            },
           },
         },
       },
@@ -165,7 +190,16 @@ export class AuthService {
       displayName: user.displayName,
       role: user.role,
       identityStatus: user.identity?.status ?? null,
+      identity: user.identity
+        ? {
+            status: user.identity.status,
+            fullName: user.identity.fullName,
+            nik: user.identity.nik,
+          }
+        : null,
       academicProfile: this.buildAcademicProfile(user),
+      pendingAcademicProfileChangeRequest:
+        user.academicProfileChangeRequests[0] ?? null,
     };
   }
 
@@ -175,24 +209,26 @@ export class AuthService {
       nim: string;
       angkatan: number | null;
       kelas: string | null;
-      prodi: { code: string; name: string };
+      prodi: { id: string; code: string; name: string };
     } | null;
     employeeProfile?: {
       nip: string | null;
       nidn: string | null;
       employeeType: string;
       positionTitle: string | null;
-      homeUnit: { code: string; name: string; type: string };
+      homeUnit: { id: string; code: string; name: string; type: string };
     } | null;
     structuralAssignments?: Array<{
       position: string;
       academicUnit: { code: string; name: string; type: string };
     }>;
+    academicProfileChangeRequests?: unknown[];
   }) {
     if (user.studentProfile) {
       return {
         type: 'STUDENT',
         identifier: user.studentProfile.nim,
+        unitId: user.studentProfile.prodi.id,
         unitCode: user.studentProfile.prodi.code,
         unitName: user.studentProfile.prodi.name,
         unitType: 'PRODI',
@@ -207,6 +243,7 @@ export class AuthService {
       return {
         type: 'EMPLOYEE',
         identifier: user.employeeProfile.nip ?? user.employeeProfile.nidn,
+        unitId: user.employeeProfile.homeUnit.id,
         unitCode: user.employeeProfile.homeUnit.code,
         unitName: user.employeeProfile.homeUnit.name,
         unitType: user.employeeProfile.homeUnit.type,
@@ -230,6 +267,111 @@ export class AuthService {
     return {
       message: 'Profil berhasil diperbarui',
       user: await this.getProfile(userId),
+    };
+  }
+
+  async requestAcademicProfileChange(
+    userId: string,
+    dto: RequestAcademicProfileChangeDto,
+  ) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        role: true,
+        studentProfile: { select: { id: true } },
+      },
+    });
+
+    if (!user) {
+      throw new NotFoundException('User tidak ditemukan');
+    }
+
+    if (user.role !== 'MAHASISWA') {
+      throw new BadRequestException(
+        'Request perubahan profil akademik mandiri hanya tersedia untuk mahasiswa',
+      );
+    }
+
+    if (!user.studentProfile) {
+      throw new BadRequestException('Profil mahasiswa belum tersedia');
+    }
+
+    const pending = await this.prisma.academicProfileChangeRequest.findFirst({
+      where: { userId, status: 'PENDING' },
+      select: { id: true },
+    });
+
+    if (pending) {
+      throw new BadRequestException(
+        'Masih ada request perubahan profil akademik yang menunggu review admin',
+      );
+    }
+
+    const prodi = await this.prisma.academicUnit.findFirst({
+      where: {
+        id: dto.prodiId,
+        type: 'PRODI',
+        isActive: true,
+      },
+      select: { id: true },
+    });
+
+    if (!prodi) {
+      throw new BadRequestException('Program studi tidak valid atau tidak aktif');
+    }
+
+    const existingNim = await this.prisma.studentProfile.findUnique({
+      where: { nim: dto.nim },
+      select: { userId: true },
+    });
+
+    if (existingNim && existingNim.userId !== userId) {
+      throw new BadRequestException('NIM sudah digunakan oleh mahasiswa lain');
+    }
+
+    const pendingNim = await this.prisma.academicProfileChangeRequest.findFirst({
+      where: {
+        nim: dto.nim,
+        status: 'PENDING',
+        userId: { not: userId },
+      },
+      select: { id: true },
+    });
+
+    if (pendingNim) {
+      throw new BadRequestException('NIM sedang diajukan oleh mahasiswa lain');
+    }
+
+    const request = await this.prisma.academicProfileChangeRequest.create({
+      data: {
+        userId,
+        nim: dto.nim.trim(),
+        prodiId: dto.prodiId,
+        angkatan: dto.angkatan ?? null,
+        kelas: dto.kelas?.trim() || null,
+      },
+      select: {
+        id: true,
+        nim: true,
+        angkatan: true,
+        kelas: true,
+        status: true,
+        createdAt: true,
+        prodi: {
+          select: {
+            id: true,
+            code: true,
+            name: true,
+          },
+        },
+      },
+    });
+
+    return {
+      message:
+        'Request perubahan profil akademik berhasil diajukan dan menunggu review admin',
+      request,
     };
   }
 

@@ -4,6 +4,10 @@ import * as forge from 'node-forge';
 import { createHash } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
 import { resolve } from 'path';
+import {
+  BlockchainDocumentRecord,
+  BlockchainService,
+} from '../blockchain/blockchain.service';
 
 /* ─── Response Types ────────────────────────────────────────────────── */
 
@@ -48,20 +52,44 @@ export type DbMatchResult = {
 };
 
 export type InspectDocumentResult = {
-  overallStatus: 'VALID' | 'MODIFIED' | 'NO_SIGNATURES' | 'PARTIAL';
+  overallStatus:
+    | 'VALID'
+    | 'MODIFIED'
+    | 'NO_SIGNATURES'
+    | 'PARTIAL'
+    | 'NOT_RECORDED'
+    | 'REVOKED';
   overallMessage: string;
   fileHash: string;
   fileSize: number;
   signatureCount: number;
   signatures: SignatureDetail[];
   dbMatch: DbMatchResult;
+  blockchain: BlockchainDocumentRecord | null;
+  verification: {
+    hashMatchesBlockchain: boolean;
+    registeredOnBlockchain: boolean;
+    revokedOnBlockchain: boolean;
+    verified: boolean;
+    message: string;
+  };
+};
+
+type PdfSignatureFields = {
+  signedAt: string | null;
+  reason: string | null;
+  location: string | null;
+  contactInfo: string | null;
 };
 
 /* ─── Service ───────────────────────────────────────────────────────── */
 
 @Injectable()
 export class PublicService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private blockchainService: BlockchainService,
+  ) {}
 
   /* ════════════════════════════════════════════════════════════════════
    *  EXISTING: Verify document by ID (called from QR scan)
@@ -74,7 +102,9 @@ export class PublicService {
         id: true,
         status: true,
         originalFileName: true,
+        finalFileHash: true,
         finalFileIpfsHash: true,
+        blockchainTxHash: true,
         revokedAt: true,
         revokeReason: true,
         createdAt: true,
@@ -152,8 +182,6 @@ export class PublicService {
           orderBy: { order: 'desc' },
           take: 1,
           select: {
-            blockchainTxHash: true,
-            signedFileIpfsHash: true,
             signedAt: true,
           },
         },
@@ -182,11 +210,13 @@ export class PublicService {
       ownerUser?.structuralAssignments?.[0]?.academicUnit?.type ??
       null;
 
-    // Resolve last signer blockchain data
+    // Resolve final document proof data
     const latestSignature = document.signatures[0] ?? null;
-    const blockchainTxHash = latestSignature?.blockchainTxHash ?? null;
-    const ipfsHash =
-      document.finalFileIpfsHash ?? latestSignature?.signedFileIpfsHash ?? null;
+    const blockchainTxHash = document.blockchainTxHash ?? null;
+    const ipfsHash = document.finalFileIpfsHash ?? null;
+    const blockchainRecord = document.finalFileHash
+      ? await this.blockchainService.getRecordByHash(document.finalFileHash)
+      : null;
 
     // Resolve signers - show name, role/position, signing status and time only
     const signers = document.requiredSigners.map((signer, index) => {
@@ -253,6 +283,7 @@ export class PublicService {
       proof: {
         ipfsHash,
         blockchainTxHash,
+        blockchain: blockchainRecord,
       },
     };
   }
@@ -276,31 +307,54 @@ export class PublicService {
     const fileHash = createHash('sha256').update(fileBuffer).digest('hex');
     const fileSize = fileBuffer.length;
 
-    // Cross-check with DoChain database
+    // Cross-check with DOCChain database
     const dbMatch = await this.crossCheckDatabase(fileHash);
+    const blockchain = await this.blockchainService.getRecordByHash(fileHash);
 
     // Extract and parse PDF signatures
     const signatures = await this.extractPdfSignatures(fileBuffer);
 
-    // Determine overall status
+    const registeredOnBlockchain = Boolean(blockchain?.exists);
+    const revokedOnBlockchain = Boolean(blockchain?.revoked);
+    const hashMatchesBlockchain =
+      registeredOnBlockchain &&
+      blockchain?.documentHash?.toLowerCase().replace(/^0x/, '') ===
+        fileHash.toLowerCase();
+
+    // Determine overall status from blockchain proof first, then PDF signatures.
     let overallStatus: InspectDocumentResult['overallStatus'];
     let overallMessage: string;
 
-    if (signatures.length === 0) {
+    if (!registeredOnBlockchain) {
+      overallStatus = 'NOT_RECORDED';
+      overallMessage =
+        'Hash file ini tidak ditemukan di blockchain DOCChain. Dokumen belum dapat dinyatakan sebagai dokumen final resmi DOCChain.';
+    } else if (revokedOnBlockchain) {
+      overallStatus = 'REVOKED';
+      overallMessage =
+        'Hash file ditemukan di blockchain, tetapi status dokumen sudah dicabut/revoked.';
+    } else if (signatures.length === 0) {
       overallStatus = 'NO_SIGNATURES';
       overallMessage =
-        'File PDF ini tidak memiliki tanda tangan digital. Tidak dapat diverifikasi.';
+        'Hash file cocok dengan blockchain, tetapi PDF tidak memiliki tanda tangan digital yang dapat dibaca.';
     } else if (signatures.every((s) => s.integrityStatus === 'INTACT')) {
       overallStatus = 'VALID';
-      overallMessage = `Semua ${signatures.length} tanda tangan valid. Dokumen tidak mengalami modifikasi sejak ditandatangani.`;
+      overallMessage = `Hash file cocok dengan blockchain dan semua ${signatures.length} tanda tangan digital masih utuh.`;
     } else if (signatures.some((s) => s.integrityStatus === 'MODIFIED')) {
       overallStatus = 'MODIFIED';
       overallMessage =
-        'Dokumen telah dimodifikasi setelah ditandatangani. Integritas tidak dapat dijamin.';
+        'Hash file tercatat, tetapi tanda tangan PDF menunjukkan dokumen telah dimodifikasi setelah ditandatangani.';
     } else {
       overallStatus = 'PARTIAL';
-      overallMessage = 'Sebagian tanda tangan tidak dapat diverifikasi sepenuhnya.';
+      overallMessage =
+        'Hash file cocok dengan blockchain, tetapi sebagian tanda tangan tidak dapat diverifikasi sepenuhnya.';
     }
+
+    const verified =
+      overallStatus === 'VALID' &&
+      hashMatchesBlockchain &&
+      registeredOnBlockchain &&
+      !revokedOnBlockchain;
 
     return {
       overallStatus,
@@ -310,6 +364,16 @@ export class PublicService {
       signatureCount: signatures.length,
       signatures,
       dbMatch,
+      blockchain,
+      verification: {
+        hashMatchesBlockchain,
+        registeredOnBlockchain,
+        revokedOnBlockchain,
+        verified,
+        message: verified
+          ? 'Dokumen valid: hash file cocok dengan blockchain, belum dicabut, dan tanda tangan digital utuh.'
+          : overallMessage,
+      },
     };
   }
 
@@ -319,35 +383,12 @@ export class PublicService {
     const results: SignatureDetail[] = [];
 
     try {
-      const pdfStr = pdfBuffer.toString('binary');
-
-      // Find all /ByteRange entries in the PDF (each marks a signature)
-      const byteRangePattern = /\/ByteRange\s*\[([^\]]+)\]/g;
-      const contentsPattern = /\/Contents\s*<([0-9a-fA-F\s]+)>/g;
-
-      const byteRanges: Array<[number, number, number, number]> = [];
-      let match: RegExpExecArray | null;
-
-      while ((match = byteRangePattern.exec(pdfStr)) !== null) {
-        const parts = match[1].trim().split(/\s+/).map(Number);
-        if (parts.length === 4) {
-          byteRanges.push([parts[0], parts[1], parts[2], parts[3]]);
-        }
-      }
-
-      const hexContents: string[] = [];
-      while ((match = contentsPattern.exec(pdfStr)) !== null) {
-        hexContents.push(match[1].replace(/\s/g, ''));
-      }
-
       // Load CA cert to build trust chain
       const caCert = this.loadCaCertificate();
+      const signatureEntries = this.extractPdfSignatureEntries(pdfBuffer);
 
-      for (let i = 0; i < Math.min(byteRanges.length, hexContents.length); i++) {
-        const byteRange = byteRanges[i];
-        const hexContent = hexContents[i];
-
-        if (!byteRange || !hexContent || hexContent.length < 10) continue;
+      for (let i = 0; i < signatureEntries.length; i++) {
+        const { byteRange, hexContent, pdfFields } = signatureEntries[i];
 
         try {
           const sigDetail = this.parseSignatureContent(
@@ -355,25 +396,16 @@ export class PublicService {
             byteRange,
             hexContent,
             caCert,
+            pdfFields,
           );
           if (sigDetail) {
             results.push(sigDetail);
+          } else {
+            results.push(this.buildUnreadableSignatureDetail(i));
           }
         } catch {
           // If one signature fails to parse, add a placeholder with error info
-          results.push({
-            signerName: `Tanda Tangan ${i + 1}`,
-            signerDN: 'Tidak dapat dibaca',
-            reason: null,
-            location: null,
-            contactInfo: null,
-            signedAt: null,
-            digestAlgorithm: 'Tidak diketahui',
-            encryptionAlgorithm: 'Tidak diketahui',
-            integrityStatus: 'CANNOT_VERIFY',
-            integrityMessage: 'Format tanda tangan tidak dapat dibaca atau tidak didukung.',
-            certificateChain: [],
-          });
+          results.push(this.buildUnreadableSignatureDetail(i));
         }
       }
     } catch {
@@ -383,16 +415,107 @@ export class PublicService {
     return results;
   }
 
+  private extractPdfSignatureEntries(pdfBuffer: Buffer) {
+    const pdfStr = pdfBuffer.toString('latin1');
+    const byteRangePattern = /\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/g;
+    const entries: Array<{
+      byteRange: [number, number, number, number];
+      hexContent: string;
+      pdfFields: PdfSignatureFields;
+    }> = [];
+
+    let match: RegExpExecArray | null;
+    while ((match = byteRangePattern.exec(pdfStr)) !== null) {
+      const byteRange = match.slice(1, 5).map(Number) as [
+        number,
+        number,
+        number,
+        number,
+      ];
+
+      if (byteRange.some((part) => !Number.isFinite(part) || part < 0)) {
+        continue;
+      }
+
+      const hexContent = this.extractSignatureHexContent(pdfStr, match.index);
+      if (hexContent && hexContent.length >= 10) {
+        entries.push({
+          byteRange,
+          hexContent,
+          pdfFields: this.extractPdfSignatureFields(pdfStr, match.index),
+        });
+      }
+    }
+
+    return entries;
+  }
+
+  private extractPdfSignatureFields(
+    pdfStr: string,
+    byteRangeIndex: number,
+  ): PdfSignatureFields {
+    const dictionaryWindow = pdfStr.slice(
+      Math.max(0, byteRangeIndex - 20_000),
+      Math.min(pdfStr.length, byteRangeIndex + 20_000),
+    );
+
+    const getLiteral = (name: string) => {
+      const match = new RegExp(`/${name}\\s*\\(([^)]*)\\)`).exec(dictionaryWindow);
+      return match?.[1] ? this.decodePdfLiteralString(match[1]) : null;
+    };
+
+    return {
+      signedAt: this.parsePdfDate(getLiteral('M')),
+      reason: getLiteral('Reason'),
+      location: getLiteral('Location'),
+      contactInfo: getLiteral('ContactInfo'),
+    };
+  }
+
+  private extractSignatureHexContent(pdfStr: string, byteRangeIndex: number) {
+    const afterWindow = pdfStr.slice(
+      byteRangeIndex,
+      Math.min(pdfStr.length, byteRangeIndex + 250_000),
+    );
+    const afterMatch = /\/Contents\s*<([0-9a-fA-F\s]+)>/.exec(afterWindow);
+    if (afterMatch) {
+      return afterMatch[1].replace(/\s/g, '');
+    }
+
+    const beforeWindow = pdfStr.slice(Math.max(0, byteRangeIndex - 250_000), byteRangeIndex);
+    const beforeMatches = [...beforeWindow.matchAll(/\/Contents\s*<([0-9a-fA-F\s]+)>/g)];
+    const beforeMatch = beforeMatches[beforeMatches.length - 1];
+    return beforeMatch?.[1]?.replace(/\s/g, '') ?? null;
+  }
+
+  private buildUnreadableSignatureDetail(index: number): SignatureDetail {
+    return {
+      signerName: `Tanda Tangan ${index + 1}`,
+      signerDN: 'Tidak dapat dibaca',
+      reason: null,
+      location: null,
+      contactInfo: null,
+      signedAt: null,
+      digestAlgorithm: 'Tidak diketahui',
+      encryptionAlgorithm: 'Tidak diketahui',
+      integrityStatus: 'CANNOT_VERIFY',
+      integrityMessage: 'ByteRange tanda tangan ditemukan, tetapi format PKCS#7 tidak dapat dibaca.',
+      certificateChain: [],
+    };
+  }
+
   private parseSignatureContent(
     pdfBuffer: Buffer,
     byteRange: [number, number, number, number],
     hexContent: string,
     caCert: forge.pki.Certificate | null,
+    pdfFields: PdfSignatureFields,
   ): SignatureDetail | null {
     // Decode the DER-encoded PKCS#7 signature from the PDF /Contents
     let sigBytes: string;
     try {
-      sigBytes = forge.util.hexToBytes(hexContent);
+      const normalizedHex = hexContent.replace(/(?:00)+$/g, '');
+      sigBytes = forge.util.hexToBytes(normalizedHex);
     } catch {
       return null;
     }
@@ -483,6 +606,11 @@ export class PublicService {
       if (!location && locationMatch) location = locationMatch[1];
       if (!contactInfo && contactMatch) contactInfo = contactMatch[1];
     } catch {}
+
+    signedAt ??= pdfFields.signedAt;
+    reason ??= pdfFields.reason;
+    location ??= pdfFields.location;
+    contactInfo ??= pdfFields.contactInfo;
 
     // Determine digest and encryption algorithms from PKCS#7 structure
     let digestAlgorithm = 'SHA-256';
@@ -714,9 +842,14 @@ export class PublicService {
 
   private loadCaCertificate(): forge.pki.Certificate | null {
     try {
+      const defaultDocchainCertPath = 'certs/docchain-ca.crt';
       const caCertPath = resolve(
         process.cwd(),
-        process.env.DOCHAIN_CA_CERT_PATH ?? 'certs/dochain-ca.crt',
+        process.env.DOCCHAIN_CA_CERT_PATH ??
+          process.env.DOCHAIN_CA_CERT_PATH ??
+          (existsSync(resolve(process.cwd(), defaultDocchainCertPath))
+            ? defaultDocchainCertPath
+            : 'certs/dochain-ca.crt'),
       );
       if (!existsSync(caCertPath)) return null;
       const pem = readFileSync(caCertPath, 'utf8');
@@ -799,6 +932,53 @@ export class PublicService {
     } catch {
       return null;
     }
+  }
+
+  private decodePdfLiteralString(value: string) {
+    return value
+      .replace(/\\([()\\])/g, '$1')
+      .replace(/\\n/g, '\n')
+      .replace(/\\r/g, '\r')
+      .replace(/\\t/g, '\t')
+      .trim();
+  }
+
+  private parsePdfDate(value: string | null): string | null {
+    if (!value) {
+      return null;
+    }
+
+    const normalized = value.trim().replace(/^D:/, '');
+    const match = /^(\d{4})(\d{2})?(\d{2})?(\d{2})?(\d{2})?(\d{2})?([Zz]|[+-]\d{2}'?\d{2}'?)?$/.exec(
+      normalized,
+    );
+
+    if (!match) {
+      const parsed = new Date(value);
+      return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
+    }
+
+    const [, year, month = '01', day = '01', hour = '00', minute = '00', second = '00', zone] =
+      match;
+    let utcMillis = Date.UTC(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hour),
+      Number(minute),
+      Number(second),
+    );
+
+    if (zone && zone !== 'Z' && zone !== 'z') {
+      const zoneMatch = /^([+-])(\d{2})'?(\d{2})'?/.exec(zone);
+      if (zoneMatch) {
+        const offsetMinutes =
+          Number(zoneMatch[2]) * 60 + Number(zoneMatch[3] ?? '0');
+        utcMillis += zoneMatch[1] === '+' ? -offsetMinutes * 60_000 : offsetMinutes * 60_000;
+      }
+    }
+
+    return new Date(utcMillis).toISOString();
   }
 
   private formatPosition(raw: string | null): string | null {

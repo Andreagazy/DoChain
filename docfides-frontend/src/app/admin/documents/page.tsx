@@ -178,7 +178,7 @@ export default function AdminDocumentsPage() {
 
     return (
         <AppShell
-            title={currentUser?.role === 'ADMIN_PRODI' ? 'Dokumen Prodi' : 'Admin Dokumen'}
+            title="Kelola Dokumen"
             subtitle={currentUser?.role === 'ADMIN_PRODI' ? 'Monitoring dokumen yang terkait dengan anggota prodi Anda.' : 'Monitoring seluruh dokumen, signer, dan alasan penolakan.'}
         >
             <div className="space-y-5">
