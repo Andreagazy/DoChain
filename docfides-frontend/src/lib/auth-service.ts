@@ -1,5 +1,11 @@
 import api from './axios';
 import {
+    clearAuthSession,
+    getStoredToken,
+    isAuthSessionIdleExpired,
+    saveAuthSession,
+} from './auth-session';
+import {
     RequestOtpDto,
     VerifyOtpDto,
     RegisterDto,
@@ -104,20 +110,19 @@ export const login = async (dto: LoginDto): Promise<AuthResponse> => {
  * Logout user (clear token from localStorage)
  */
 export const logout = (): void => {
-    if (typeof window !== 'undefined') {
-        localStorage.removeItem('token');
-        localStorage.removeItem('user');
-    }
+    clearAuthSession();
 };
 
 /**
  * Get stored token
  */
 export const getToken = (): string | null => {
-    if (typeof window !== 'undefined') {
-        return localStorage.getItem('token');
+    if (isAuthSessionIdleExpired()) {
+        logout();
+        return null;
     }
-    return null;
+
+    return getStoredToken();
 };
 
 export const getDefaultHomePath = (user: User | null): string => {
@@ -141,10 +146,7 @@ export const getUser = (): User | null => {
  * Save token and user to localStorage
  */
 export const saveAuthData = (token: string, user: User): void => {
-    if (typeof window !== 'undefined') {
-        localStorage.setItem('token', token);
-        localStorage.setItem('user', JSON.stringify(user));
-    }
+    saveAuthSession(token, JSON.stringify(user));
 };
 
 export const getProfile = async (): Promise<User> => {

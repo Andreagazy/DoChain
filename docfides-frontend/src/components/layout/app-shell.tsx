@@ -1,6 +1,15 @@
-import { ReactNode } from 'react';
+'use client';
+
+import { ReactNode, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 import { AppSidebar } from '@/components/layout/app-sidebar';
 import { AppTopbar } from '@/components/layout/app-topbar';
+import {
+    clearAuthSession,
+    getStoredToken,
+    isAuthSessionIdleExpired,
+    recordAuthActivity,
+} from '@/lib/auth-session';
 
 interface AppShellProps {
     title: string;
@@ -9,6 +18,65 @@ interface AppShellProps {
 }
 
 export function AppShell({ title, subtitle, children }: AppShellProps) {
+    const router = useRouter();
+    const lastActivityWriteRef = useRef(0);
+
+    useEffect(() => {
+        const expireSession = () => {
+            clearAuthSession();
+            router.replace('/login?reason=session-expired');
+        };
+
+        const checkIdleTimeout = () => {
+            if (isAuthSessionIdleExpired()) {
+                expireSession();
+            }
+        };
+
+        const handleActivity = () => {
+            if (!getStoredToken()) {
+                return;
+            }
+
+            if (isAuthSessionIdleExpired()) {
+                expireSession();
+                return;
+            }
+
+            const now = Date.now();
+            if (now - lastActivityWriteRef.current > 30_000) {
+                recordAuthActivity();
+                lastActivityWriteRef.current = now;
+            }
+        };
+
+        const activityEvents: Array<keyof WindowEventMap> = [
+            'click',
+            'keydown',
+            'mousemove',
+            'scroll',
+            'touchstart',
+        ];
+
+        activityEvents.forEach((eventName) => {
+            window.addEventListener(eventName, handleActivity, { passive: true });
+        });
+        window.addEventListener('focus', checkIdleTimeout);
+        document.addEventListener('visibilitychange', checkIdleTimeout);
+
+        const interval = window.setInterval(checkIdleTimeout, 60_000);
+        checkIdleTimeout();
+
+        return () => {
+            activityEvents.forEach((eventName) => {
+                window.removeEventListener(eventName, handleActivity);
+            });
+            window.removeEventListener('focus', checkIdleTimeout);
+            document.removeEventListener('visibilitychange', checkIdleTimeout);
+            window.clearInterval(interval);
+        };
+    }, [router]);
+
     return (
         <div className="relative min-h-screen bg-slate-50/40 text-slate-950 overflow-hidden">
             <div className="pointer-events-none fixed inset-y-0 left-0 z-0 hidden w-66 border-r border-slate-200/60 bg-white/90 backdrop-blur-md lg:block" />
