@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowRight, ArrowUpDown, Download, ExternalLink, Eye, FileText } from 'lucide-react';
+import { ArrowRight, ArrowUpDown, Download, Eye, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { OwnedDocumentItem } from '@/types/auth';
@@ -12,7 +12,7 @@ interface DocumentTableProps {
     sortDirection: 'asc' | 'desc';
     onSortChange: (nextSortBy: 'name' | 'updatedAt' | 'status') => void;
     onDownloadOriginal: (doc: OwnedDocumentItem) => void;
-    onDownloadSigned: (doc: OwnedDocumentItem) => void;
+    onDownloadIpfs: (doc: OwnedDocumentItem) => void;
 }
 
 export function DocumentTable({
@@ -21,7 +21,7 @@ export function DocumentTable({
     sortDirection,
     onSortChange,
     onDownloadOriginal,
-    onDownloadSigned,
+    onDownloadIpfs,
 }: DocumentTableProps) {
     const sortLabel = (key: 'name' | 'updatedAt' | 'status', label: string) => (
         <button
@@ -92,27 +92,15 @@ export function DocumentTable({
                                             <Button variant="outline" className="h-8 border-slate-200/80 hover:bg-indigo-50/50 hover:text-indigo-600 hover:border-indigo-200/60 rounded-lg text-xs font-semibold shadow-xs transition-all" size="sm" onClick={() => onDownloadOriginal(doc)} title="Unduh dokumen asli">
                                                 <Download className="h-3.5 w-3.5" /> Asli
                                             </Button>
-                                            <Button
-                                                variant="outline"
-                                                className="h-8 border-slate-200/80 hover:bg-indigo-50/50 hover:text-indigo-600 hover:border-indigo-200/60 rounded-lg text-xs font-semibold shadow-xs transition-all disabled:opacity-30"
-                                                size="sm"
-                                                onClick={() => onDownloadSigned(doc)}
-                                                disabled={!doc.finalFileName}
-                                                title="Unduh dokumen final"
-                                            >
-                                                <Download className="h-3.5 w-3.5" /> Final
-                                            </Button>
-                                            {doc.finalFileIpfsGatewayUrl ? (
+                                            {doc.finalFileName || doc.finalFileIpfsHash || doc.finalFileIpfsGatewayUrl ? (
                                                 <Button
                                                     variant="outline"
                                                     className="h-8 border-slate-200/80 hover:bg-emerald-50/50 hover:text-emerald-600 hover:border-emerald-200/60 rounded-lg text-xs font-semibold shadow-xs transition-all"
                                                     size="sm"
-                                                    asChild
-                                                    title="Buka file final di IPFS"
+                                                    onClick={() => onDownloadIpfs(doc)}
+                                                    title="Unduh file final dari IPFS. Jika IPFS tidak tersedia, sistem memakai fallback backend."
                                                 >
-                                                    <a href={doc.finalFileIpfsGatewayUrl} target="_blank" rel="noreferrer">
-                                                        <ExternalLink className="h-3.5 w-3.5" /> IPFS
-                                                    </a>
+                                                    <Download className="h-3.5 w-3.5" /> Final IPFS
                                                 </Button>
                                             ) : null}
                                             <Link href={buildCertificationStepHref(getDocumentNextCertificationStep(doc.status, doc.requiredSignerCount), doc.id)}>

@@ -40,8 +40,8 @@ export default function RegisterPage() {
       <aside className="hidden w-[420px] xl:w-[480px] shrink-0 flex-col bg-blue-600 lg:flex">
         {/* Logo */}
         <div className="flex items-center gap-3 px-10 pt-10">
-          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/20">
-            <ShieldCheck className="h-5 w-5 text-white" />
+          <div className="flex h-9 w-9 items-center justify-center">
+            <img src="/image/docchain-logo.png" alt="DOCChain" className="h-9 w-9 object-contain" />
           </div>
           <div>
             <p className="text-sm font-bold text-white">DOCChain</p>
@@ -115,8 +115,8 @@ export default function RegisterPage() {
               </Button>
             ) : (
               <div className="flex items-center gap-2 lg:hidden">
-                <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-600">
-                  <ShieldCheck className="h-4 w-4 text-white" />
+                <div className="flex h-7 w-7 items-center justify-center">
+                  <img src="/image/docchain-logo.png" alt="DOCChain" className="h-7 w-7 object-contain" />
                 </div>
                 <span className="text-sm font-bold text-gray-900">DOCChain</span>
               </div>

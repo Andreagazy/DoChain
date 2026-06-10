@@ -2,7 +2,6 @@ import Link from 'next/link';
 import {
     ArrowRight,
     CheckCircle2,
-    FileCheck2,
     FileSignature,
     Fingerprint,
     KeyRound,
@@ -79,8 +78,8 @@ export default function HomePage() {
 
                 <nav className="relative z-10 mx-auto flex max-w-7xl items-center justify-between px-5 py-5 lg:px-8">
                     <Link href="/" className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-md bg-blue-600 text-white shadow-sm">
-                            <FileCheck2 className="h-5 w-5" />
+                        <div className="flex h-10 w-10 items-center justify-center">
+                            <img src="/image/docchain-logo.png" alt="DOCChain" className="h-10 w-10 object-contain" />
                         </div>
                         <div>
                             <p className="text-lg font-extrabold tracking-tight text-slate-950">DOCChain</p>

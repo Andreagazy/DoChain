@@ -113,8 +113,8 @@ export default function LoginPage() {
         <div className="hidden lg:flex lg:w-[45%] flex-col justify-between bg-blue-600 p-10 text-white">
           {/* Brand */}
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/20">
-              <ShieldCheck className="h-4 w-4 text-white" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-white">
+              <img src="/image/docchain-logo.png" alt="DOCChain" className="h-6.5 w-6.5 object-contain" />
             </div>
             <span className="text-sm font-bold">DOCChain</span>
           </div>
@@ -137,8 +137,8 @@ export default function LoginPage() {
         <div className="flex flex-1 flex-col items-center justify-center px-8 py-10">
 
           {/* Logo (mobile + desktop) */}
-          <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50">
-            <ShieldCheck className="h-7 w-7 text-blue-600" />
+          <div className="mb-5 flex h-14 w-14 items-center justify-center">
+            <img src="/image/docchain-logo.png" alt="DOCChain" className="h-14 w-14 object-contain" />
           </div>
 
           <h2 className="text-xl font-bold text-gray-900 mb-8">Selamat Datang!</h2>

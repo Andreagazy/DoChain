@@ -490,7 +490,9 @@ export interface IpfsStatusResponse {
   configured: boolean;
   connected: boolean;
   apiUrl: string | null;
+  replicaApiUrls?: string[];
   gatewayUrl: string | null;
+  gatewayUrls?: string[];
   version: string | null;
   error: string | null;
 }

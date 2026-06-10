@@ -7,6 +7,13 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import { AppShell } from '@/components/layout/app-shell';
 import { CertificationStepper } from '@/components/certification/certification-stepper';
 import {
@@ -50,6 +57,7 @@ function CertificationReviewContent() {
     const signingReason = 'DOCChain digital signature';
     const [signerDetailsLoading, setSignerDetailsLoading] = useState(false);
     const [documentSignerDetails, setDocumentSignerDetails] = useState<Awaited<ReturnType<typeof getDocumentSignerPlaceholders>> | null>(null);
+    const [signConfirmOpen, setSignConfirmOpen] = useState(false);
     const [selectedDocumentPreviewUrl, setSelectedDocumentPreviewUrl] = useState('');
     const [selectedDocumentPreviewBlob, setSelectedDocumentPreviewBlob] = useState<Blob | null>(null);
     const [previewLoading, setPreviewLoading] = useState(false);
@@ -385,7 +393,7 @@ function CertificationReviewContent() {
         });
     };
 
-    const handleOwnerSign = async () => {
+    const openOwnerSignConfirmation = () => {
         if (!selectedDocumentId) {
             setError('Pilih dokumen terlebih dahulu.');
             return;
@@ -406,6 +414,10 @@ function CertificationReviewContent() {
             return;
         }
 
+        setSignConfirmOpen(true);
+    };
+
+    const handleOwnerSign = async () => {
         await execute('Sign Dokumen', async () => {
             const result = await signDocumentCertification(selectedDocumentId, {
                 mode: preferredMode,
@@ -428,6 +440,7 @@ function CertificationReviewContent() {
             );
 
             await refreshSelectedDocumentState(selectedDocumentId);
+            setSignConfirmOpen(false);
         });
     };
 
@@ -572,7 +585,7 @@ function CertificationReviewContent() {
                                     Pilih dan simpan lokasi QR verifikasi terlebih dahulu. Setelah QR tersimpan, tombol sign akan muncul.
                                 </div>
                             ) : (
-                                <Button className="rounded-xl bg-blue-600 font-semibold text-white hover:bg-blue-700" onClick={handleOwnerSign} disabled={loadingAction !== '' || !canShowSignAction}>
+                                <Button className="rounded-xl bg-blue-600 font-semibold text-white hover:bg-blue-700" onClick={openOwnerSignConfirmation} disabled={loadingAction !== '' || !canShowSignAction}>
                                     {loadingAction === 'Sign Dokumen' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PenLine className="mr-2 h-4 w-4" />}
                                     Sign Dokumen Terpilih
                                 </Button>
@@ -675,6 +688,41 @@ function CertificationReviewContent() {
                         </CardContent>
                     </Card>
                 ) : null}
+
+                <Dialog open={signConfirmOpen} onOpenChange={setSignConfirmOpen}>
+                    <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
+                        <DialogHeader>
+                            <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-blue-50 text-blue-700">
+                                <PenLine className="h-5 w-5" />
+                            </div>
+                            <DialogTitle>Konfirmasi Tanda Tangan</DialogTitle>
+                            <DialogDescription>
+                                Pastikan dokumen sudah benar. Setelah dikonfirmasi, tanda tangan digital Anda akan diterapkan ke dokumen ini.
+                            </DialogDescription>
+                        </DialogHeader>
+
+                        <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+                            <div>
+                                <p className="text-xs font-semibold uppercase text-slate-500">Dokumen</p>
+                                <p className="mt-1 font-semibold text-slate-900">{selectedDocument?.originalFileName ?? selectedDocument?.finalFileName ?? '-'}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs font-semibold uppercase text-slate-500">Status Signer</p>
+                                <p className="mt-1 text-slate-800">{signedSignerCount} / {totalSignerCount}</p>
+                            </div>
+                        </div>
+
+                        <div className="flex flex-wrap justify-end gap-2">
+                            <Button variant="outline" className="border-slate-300" onClick={() => setSignConfirmOpen(false)} disabled={loadingAction !== ''}>
+                                Batal
+                            </Button>
+                            <Button className="bg-blue-600 text-white hover:bg-blue-700" onClick={() => void handleOwnerSign()} disabled={loadingAction !== ''}>
+                                {loadingAction === 'Sign Dokumen' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PenLine className="mr-2 h-4 w-4" />}
+                                Ya, Tanda Tangani
+                            </Button>
+                        </div>
+                    </DialogContent>
+                </Dialog>
 
                 {/* <Card className="rounded-lg border-blue-100 bg-white shadow-sm">
                     <CardHeader>

@@ -282,6 +282,14 @@ export const getIpfsStatus = async (): Promise<IpfsStatusResponse> => {
     return response.data;
 };
 
+export const getIpfsFile = async (cid: string): Promise<Blob> => {
+    const response = await api.get(`/certification/ipfs/${encodeURIComponent(cid)}/file`, {
+        responseType: 'blob',
+    });
+
+    return response.data as Blob;
+};
+
 export const uploadDocumentForCertification = async (
     documentFile: File,
 ): Promise<UploadDocumentResponse> => {

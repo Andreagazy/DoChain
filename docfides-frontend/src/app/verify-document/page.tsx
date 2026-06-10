@@ -817,8 +817,8 @@ export default function VerifyDocumentPage() {
                 {/* Branding header */}
                 <div className="rounded-lg border border-slate-200 bg-white px-5 py-5 text-center shadow-sm">
                     <div className="mx-auto flex w-fit items-center gap-2">
-                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-blue-600">
-                            <ShieldCheck className="h-5 w-5 text-white" />
+                        <div className="flex h-9 w-9 items-center justify-center">
+                            <img src="/image/docchain-logo.png" alt="DOCChain" className="h-9 w-9 object-contain" />
                         </div>
                         <span className="text-lg font-bold tracking-tight text-slate-950">DOCChain</span>
                     </div>

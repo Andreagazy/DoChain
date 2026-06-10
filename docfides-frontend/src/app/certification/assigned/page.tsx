@@ -40,6 +40,12 @@ type DeclineDialogState = {
     title: string;
 } | null;
 
+type SignDialogState = {
+    documentId: string;
+    title: string;
+    owner: string;
+} | null;
+
 const ASSIGNMENTS_PER_PAGE = 5;
 const INACTIVE_DOCUMENT_STATUSES = ['REVOKED', 'REJECTED'];
 
@@ -88,6 +94,7 @@ export default function CertificationAssignedDocumentsPage() {
     const [previewError, setPreviewError] = useState('');
     const [currentPage, setCurrentPage] = useState(1);
     const [declineDialog, setDeclineDialog] = useState<DeclineDialogState>(null);
+    const [signDialog, setSignDialog] = useState<SignDialogState>(null);
     const [declineReason, setDeclineReason] = useState('');
 
     const pendingAssignments = useMemo(
@@ -212,17 +219,30 @@ export default function CertificationAssignedDocumentsPage() {
         });
     };
 
-    const handleAssignedSign = async (documentId: string) => {
+    const openSignDialog = (assignment: AssignedDocumentItem) => {
+        if (!isAssignmentActionable(assignment)) {
+            return;
+        }
+
         if (preferredMode === 'visible' && !hasSignature) {
             router.push('/signature-setup?next=/certification');
             return;
         }
 
+        setSignDialog({
+            documentId: assignment.document.id,
+            title: getAssignmentTitle(assignment),
+            owner: assignment.document.ownerDisplayName ?? assignment.document.ownerEmail ?? '-',
+        });
+    };
+
+    const handleAssignedSign = async (documentId: string) => {
         await execute('Sign Dokumen', async () => {
             await signDocumentCertification(documentId, {
                 mode: preferredMode,
                 reason: 'DOCChain digital signature',
             });
+            setSignDialog(null);
             await refreshAssignments();
         });
     };
@@ -429,7 +449,7 @@ export default function CertificationAssignedDocumentsPage() {
                                         </Button>
                                         <Button
                                             className="h-10 rounded-xl bg-blue-600 font-semibold text-white hover:bg-blue-700"
-                                            onClick={() => handleAssignedSign(assignment.document.id)}
+                                            onClick={() => openSignDialog(assignment)}
                                             disabled={loadingAction !== '' || !actionable}
                                         >
                                             {loadingAction === 'Sign Dokumen' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PenLine className="mr-2 h-4 w-4" />}
@@ -513,8 +533,11 @@ export default function CertificationAssignedDocumentsPage() {
             </Dialog>
 
             <Dialog open={Boolean(declineDialog)} onOpenChange={(open) => !open && setDeclineDialog(null)}>
-                <DialogContent className="max-w-lg">
+                <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
                     <DialogHeader>
+                        <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-red-50 text-red-700">
+                            <XCircle className="h-5 w-5" />
+                        </div>
                         <DialogTitle>Tolak Tanda Tangan</DialogTitle>
                         <DialogDescription>
                             Penolakan akan menghentikan alur dokumen sehingga signer berikutnya tidak bisa melanjutkan.
@@ -523,14 +546,19 @@ export default function CertificationAssignedDocumentsPage() {
 
                     <div className="space-y-3">
                         <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700">
-                            {declineDialog?.title ?? '-'}
+                            <p className="text-xs font-semibold uppercase text-slate-500">Dokumen</p>
+                            <p className="mt-1 font-semibold text-slate-900">{declineDialog?.title ?? '-'}</p>
                         </div>
+                        <div className="space-y-1.5">
+                            <label className="text-sm font-semibold text-slate-700">Alasan penolakan</label>
                         <textarea
                             value={declineReason}
                             onChange={(event) => setDeclineReason(event.target.value)}
                             placeholder="Tuliskan alasan penolakan, misalnya data dokumen tidak valid atau perlu revisi."
-                            className="min-h-32 w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-blue-500/20 placeholder:text-slate-400 focus:border-blue-500 focus:ring-4"
+                                className="min-h-28 w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none ring-red-500/20 placeholder:text-slate-400 focus:border-red-500 focus:ring-4"
                         />
+                            <p className="text-xs text-slate-500">Minimal 5 karakter agar alasan bisa dipahami oleh pemilik dokumen.</p>
+                        </div>
                         <div className="flex flex-wrap justify-end gap-2">
                             <Button variant="outline" className="border-slate-300" onClick={() => setDeclineDialog(null)}>
                                 Batal
@@ -544,6 +572,45 @@ export default function CertificationAssignedDocumentsPage() {
                                 Tolak Dokumen
                             </Button>
                         </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={Boolean(signDialog)} onOpenChange={(open) => !open && setSignDialog(null)}>
+                <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
+                    <DialogHeader>
+                        <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-blue-50 text-blue-700">
+                            <PenLine className="h-5 w-5" />
+                        </div>
+                        <DialogTitle>Konfirmasi Tanda Tangan</DialogTitle>
+                        <DialogDescription>
+                            Tinjau dokumen terlebih dahulu. Setelah dikonfirmasi, tanda tangan digital Anda akan diterapkan dan aksi ini tidak bisa dibatalkan dari sisi signer.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+                        <div>
+                            <p className="text-xs font-semibold uppercase text-slate-500">Dokumen</p>
+                            <p className="mt-1 font-semibold text-slate-900">{signDialog?.title ?? '-'}</p>
+                        </div>
+                        <div>
+                            <p className="text-xs font-semibold uppercase text-slate-500">Pemilik</p>
+                            <p className="mt-1 text-slate-800">{signDialog?.owner ?? '-'}</p>
+                        </div>
+                    </div>
+
+                    <div className="flex flex-wrap justify-end gap-2">
+                        <Button variant="outline" className="border-slate-300" onClick={() => setSignDialog(null)} disabled={loadingAction !== ''}>
+                            Batal
+                        </Button>
+                        <Button
+                            className="bg-blue-600 text-white hover:bg-blue-700"
+                            onClick={() => signDialog && void handleAssignedSign(signDialog.documentId)}
+                            disabled={loadingAction !== '' || !signDialog}
+                        >
+                            {loadingAction === 'Sign Dokumen' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PenLine className="mr-2 h-4 w-4" />}
+                            Ya, Tanda Tangani
+                        </Button>
                     </div>
                 </DialogContent>
             </Dialog>

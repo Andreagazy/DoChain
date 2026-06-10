@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Building2, ClipboardList, FileSignature, FileText, FolderOpen, Inbox, LayoutDashboard, PenSquare, ShieldCheck, UserCircle, Users } from 'lucide-react';
+import { Building2, ClipboardList, FileSignature, FolderOpen, Inbox, LayoutDashboard, PenSquare, ShieldCheck, UserCircle, Users } from 'lucide-react';
 import { getUser } from '@/lib/auth-service';
 
 const navItems = [
@@ -55,8 +55,8 @@ export function AppSidebar() {
         <aside className="sticky top-0 hidden h-dvh min-h-dvh w-66 shrink-0 self-start overflow-y-auto border-r border-slate-200/60 bg-white/90 backdrop-blur-md p-4 lg:block">
             <div className="px-3 py-4 text-slate-950 border-b border-slate-100">
                 <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 shadow-md shadow-indigo-500/20 text-white">
-                        <FileText className="h-5.5 w-5.5" />
+                    <div className="flex h-10 w-10 items-center justify-center">
+                        <img src="/image/docchain-logo.png" alt="DOCChain" className="h-10 w-10 object-contain" />
                     </div>
                     <div>
                         <h1 className="text-md font-extrabold tracking-tight bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-transparent font-display">DOCChain</h1>

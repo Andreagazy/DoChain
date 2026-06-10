@@ -227,6 +227,10 @@ export class CertificationService {
     return this.ipfsService.getStatus();
   }
 
+  async getIpfsFile(cid: string) {
+    return this.ipfsService.fetchFile(cid);
+  }
+
   async listAssignedDocuments(userId: string) {
     const assignments = await this.prisma.documentSigner.findMany({
       where: {

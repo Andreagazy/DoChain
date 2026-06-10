@@ -366,8 +366,8 @@ function VerifyContent() {
             <div className="mx-auto w-full max-w-5xl space-y-5">
                 <header className="flex flex-col gap-4 rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-sm md:flex-row md:items-center md:justify-between">
                     <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600">
-                            <ShieldCheck className="h-5 w-5 text-white" />
+                        <div className="flex h-10 w-10 items-center justify-center">
+                            <img src="/image/docchain-logo.png" alt="DOCChain" className="h-10 w-10 object-contain" />
                         </div>
                         <div>
                             <p className="text-lg font-bold text-slate-950">DOCChain</p>

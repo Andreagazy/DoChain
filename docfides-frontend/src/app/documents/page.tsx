@@ -1,19 +1,27 @@
 'use client';
 
 import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { FileText, RefreshCw, Search, UploadCloud } from 'lucide-react';
+import { AlertTriangle, FileText, RefreshCw, Search, UploadCloud } from 'lucide-react';
 import { AxiosError } from 'axios';
 import { AppShell } from '@/components/layout/app-shell';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
 import { DocumentTable } from '@/components/documents/document-table';
 import { EmptyState } from '@/components/common/empty-state';
 import {
     listMyCertificationDocuments,
     getCertificationDocumentOriginalFile,
     getCertificationDocumentSignedFile,
+    getIpfsFile,
     uploadDocumentForCertification,
 } from '@/lib/auth-service';
 import { OwnedDocumentItem } from '@/types/auth';
@@ -32,6 +40,7 @@ export default function DocumentsPage() {
     const [loading, setLoading] = useState(true);
     const [uploading, setUploading] = useState(false);
     const [error, setError] = useState('');
+    const [notice, setNotice] = useState('');
 
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'pending' | 'signed'>('all');
@@ -41,6 +50,7 @@ export default function DocumentsPage() {
 
     const loadDocuments = async () => {
         setError('');
+        setNotice('');
         try {
             const response = await listMyCertificationDocuments();
             setDocuments(response.documents);
@@ -142,6 +152,8 @@ export default function DocumentsPage() {
     };
 
     const handleDownloadOriginal = async (doc: OwnedDocumentItem) => {
+        setError('');
+        setNotice('');
         try {
             const blob = await getCertificationDocumentOriginalFile(doc.id);
             triggerDownload(blob, doc.originalFileName ?? `${doc.id}.pdf`);
@@ -150,12 +162,30 @@ export default function DocumentsPage() {
         }
     };
 
-    const handleDownloadSigned = async (doc: OwnedDocumentItem) => {
+    const handleDownloadIpfs = async (doc: OwnedDocumentItem) => {
+        setError('');
+        setNotice('');
+
         try {
-            const blob = await getCertificationDocumentSignedFile(doc.id);
-            triggerDownload(blob, buildSignedDownloadName(doc));
-        } catch (err) {
-            setError(normalizeErrorMessage(err));
+            if (doc.finalFileIpfsHash) {
+                const blob = await getIpfsFile(doc.finalFileIpfsHash);
+                triggerDownload(blob, buildSignedDownloadName(doc));
+                return;
+            }
+
+            throw new Error('CID IPFS dokumen belum tersedia');
+        } catch {
+            try {
+                const fallbackBlob = await getCertificationDocumentSignedFile(doc.id);
+                triggerDownload(fallbackBlob, buildSignedDownloadName(doc));
+                setNotice(
+                    `Semua node IPFS sedang tidak tersedia atau file belum bisa diambil dari IPFS. Dokumen final diunduh dari penyimpanan backend sementara.`,
+                );
+            } catch (fallbackErr) {
+                setError(
+                    `IPFS tidak tersedia dan fallback backend gagal: ${normalizeErrorMessage(fallbackErr)}`,
+                );
+            }
         }
     };
 
@@ -176,6 +206,7 @@ export default function DocumentsPage() {
         }
 
         setError('');
+        setNotice('');
 
         if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
             setError('File dokumen harus berupa PDF.');
@@ -269,7 +300,7 @@ export default function DocumentsPage() {
                             sortDirection={sortDirection}
                             onSortChange={handleSortChange}
                             onDownloadOriginal={handleDownloadOriginal}
-                            onDownloadSigned={handleDownloadSigned}
+                            onDownloadIpfs={handleDownloadIpfs}
                         />
 
                         <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
@@ -301,6 +332,26 @@ export default function DocumentsPage() {
                     </div>
                 )}
             </div>
+
+            <Dialog open={Boolean(notice)} onOpenChange={(open) => !open && setNotice('')}>
+                <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
+                    <DialogHeader>
+                        <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-amber-50 text-amber-700">
+                            <AlertTriangle className="h-5 w-5" />
+                        </div>
+                        <DialogTitle>IPFS Sedang Tidak Tersedia</DialogTitle>
+                        <DialogDescription>
+                            {notice}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                        File tetap berhasil diunduh dari penyimpanan backend. Cek node IPFS jika ingin memastikan replikasi berjalan normal.
+                    </div>
+                    <div className="flex justify-end">
+                        <Button onClick={() => setNotice('')}>Mengerti</Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
         </AppShell>
     );
 }

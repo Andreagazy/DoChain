@@ -201,6 +201,16 @@ export class CertificationController {
     return this.certificationService.getIpfsStatus();
   }
 
+  @Get('ipfs/:cid/file')
+  async getIpfsFile(@Param('cid') cid: string, @Res() res: Response) {
+    const file = await this.certificationService.getIpfsFile(cid);
+
+    res.setHeader('Content-Type', file.contentType);
+    res.setHeader('Content-Disposition', `inline; filename="${cid}.pdf"`);
+    res.setHeader('X-IPFS-Gateway-Url', file.gatewayUrl);
+    res.send(file.content);
+  }
+
   @Patch('signature/preference')
   async updateSignaturePreference(
     @Req() req: RequestWithUser,
