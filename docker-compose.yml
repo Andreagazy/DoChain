@@ -1,0 +1,66 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: docchain-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-docchain}
+      POSTGRES_USER: ${POSTGRES_USER:-docchain}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-docchain_password}
+    volumes:
+      - docchain-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-docchain} -d ${POSTGRES_DB:-docchain}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: docchain-redis
+    restart: unless-stopped
+    volumes:
+      - docchain-redis-data:/data
+
+  backend:
+    build:
+      context: ./docfides-backend
+    container_name: docchain-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "${BACKEND_PORT:-4000}:4000"
+    env_file:
+      - ./docfides-backend/.env.docker
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DATABASE_URL: postgresql://${POSTGRES_USER:-docchain}:${POSTGRES_PASSWORD:-docchain_password}@postgres:5432/${POSTGRES_DB:-docchain}?schema=public
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./docfides-backend/uploads:/app/uploads
+      - ./docfides-backend/certs:/app/certs
+    command: sh -c "npx prisma migrate deploy && node dist/main"
+
+  frontend:
+    build:
+      context: ./docfides-frontend
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:4000}
+    container_name: docchain-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+
+volumes:
+  docchain-postgres-data:
+  docchain-redis-data:
