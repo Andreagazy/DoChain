@@ -28,7 +28,7 @@ services:
     volumes:
       - ./docfides-backend/uploads:/app/uploads
       - ./docfides-backend/certs:/app/certs
-    command: sh -c "npx prisma migrate deploy && node dist/main"
+    command: sh -c "npx prisma migrate deploy && node dist/src/main.js"
 
   frontend:
     build:
