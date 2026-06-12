@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 export type IpfsAddResult = {
   cid: string;
   gatewayUrl: string | null;
+  uploadedApiUrl: string;
   replicas: IpfsReplicaPinResult[];
 };
 
@@ -99,47 +100,31 @@ export class IpfsService {
     content: Buffer,
     fileName: string,
   ): Promise<IpfsAddResult | null> {
-    const apiUrl = this.getApiUrl();
+    const apiUrls = this.getWritableApiUrls();
 
-    if (!apiUrl) {
+    if (apiUrls.length === 0) {
       return null;
     }
 
+    const errors: string[] = [];
+
     try {
-      const arrayBuffer = new ArrayBuffer(content.byteLength);
-      new Uint8Array(arrayBuffer).set(content);
-
-      const formData = new FormData();
-      formData.append(
-        'file',
-        new Blob([arrayBuffer], { type: 'application/pdf' }),
-        fileName,
-      );
-
-      const response = await fetch(
-        `${apiUrl}/api/v0/add?pin=true&cid-version=1`,
-        {
-          method: 'POST',
-          body: formData,
-          headers: this.buildAuthHeaders(),
-        },
-      );
-
-      const responseText = await response.text();
-      if (!response.ok) {
-        throw new Error(
-          responseText || `IPFS API responded with ${response.status}`,
-        );
+      for (const apiUrl of apiUrls) {
+        try {
+          const cid = await this.addPdfToApi(apiUrl, content, fileName);
+          const replicas = await this.pinToReplicas(cid, apiUrl);
+          const gatewayUrl = this.buildGatewayUrl(cid);
+          return { cid, gatewayUrl, uploadedApiUrl: apiUrl, replicas };
+        } catch (err) {
+          const error = err instanceof Error ? err.message : 'unknown error';
+          errors.push(`${apiUrl}: ${error}`);
+          this.logger.warn(`Upload IPFS ke ${apiUrl} gagal: ${error}`);
+        }
       }
 
-      const cid = this.parseCid(responseText);
-      if (!cid) {
-        throw new Error('IPFS API response tidak berisi CID');
-      }
-
-      const replicas = await this.pinToReplicas(cid);
-      const gatewayUrl = this.buildGatewayUrl(cid);
-      return { cid, gatewayUrl, replicas };
+      throw new Error(
+        `Semua node IPFS upload gagal (${errors.join('; ')})`,
+      );
     } catch (err) {
       if (this.configService.get<string>('IPFS_UPLOAD_REQUIRED') === 'true') {
         throw err;
@@ -150,6 +135,52 @@ export class IpfsService {
       );
       return null;
     }
+  }
+
+  private async addPdfToApi(
+    apiUrl: string,
+    content: Buffer,
+    fileName: string,
+  ) {
+    const timeoutMs = Number(
+      this.configService.get<string>('IPFS_UPLOAD_TIMEOUT_MS') ?? '60000',
+    );
+    const timeout =
+      Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 60000;
+    const arrayBuffer = new ArrayBuffer(content.byteLength);
+    new Uint8Array(arrayBuffer).set(content);
+
+    const formData = new FormData();
+    formData.append(
+      'file',
+      new Blob([arrayBuffer], { type: 'application/pdf' }),
+      fileName,
+    );
+
+    const response = await fetch(
+      `${apiUrl}/api/v0/add?pin=true&cid-version=1`,
+      {
+        method: 'POST',
+        body: formData,
+        headers: this.buildHeadersForApiUrl(apiUrl),
+        signal: AbortSignal.timeout(timeout),
+      },
+    );
+
+    const responseText = await response.text();
+    if (!response.ok) {
+      throw new Error(
+        responseText || `IPFS API responded with ${response.status}`,
+      );
+    }
+
+    const cid = this.parseCid(responseText);
+    if (!cid) {
+      throw new Error('IPFS API response tidak berisi CID');
+    }
+
+    this.logger.log(`File ${fileName} berhasil diupload ke IPFS ${apiUrl}`);
+    return cid;
   }
 
   async fetchFile(cid: string): Promise<IpfsFileResult> {
@@ -237,8 +268,13 @@ export class IpfsService {
     );
   }
 
-  private async pinToReplicas(cid: string): Promise<IpfsReplicaPinResult[]> {
-    const replicaApiUrls = this.getReplicaApiUrls();
+  private async pinToReplicas(
+    cid: string,
+    uploadedApiUrl?: string,
+  ): Promise<IpfsReplicaPinResult[]> {
+    const replicaApiUrls = this.getReplicaApiUrls().filter(
+      (replicaApiUrl) => replicaApiUrl !== uploadedApiUrl,
+    );
 
     if (replicaApiUrls.length === 0) {
       return [];
@@ -328,6 +364,12 @@ export class IpfsService {
     return authHeader ? { Authorization: authHeader } : {};
   }
 
+  private buildHeadersForApiUrl(apiUrl: string): HeadersInit {
+    return apiUrl === this.getApiUrl()
+      ? this.buildAuthHeaders()
+      : this.buildReplicaAuthHeaders();
+  }
+
   private parseCid(responseText: string) {
     const lines = responseText
       .split('\n')
@@ -380,6 +422,10 @@ export class IpfsService {
     }
 
     return [...uniqueUrls];
+  }
+
+  private getWritableApiUrls() {
+    return this.getReadableApiUrls();
   }
 
   private getGatewayBaseUrl() {

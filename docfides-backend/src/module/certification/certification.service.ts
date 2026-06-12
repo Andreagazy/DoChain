@@ -184,10 +184,22 @@ export class CertificationService {
 
   async listMyDocuments(userId: string) {
     const documents = await this.prisma.document.findMany({
-      where: { userId },
+      where: {
+        OR: [
+          { userId },
+          {
+            requiredSigners: {
+              some: {
+                userId,
+              },
+            },
+          },
+        ],
+      },
       orderBy: { updatedAt: 'desc' },
       select: {
         id: true,
+        userId: true,
         status: true,
         originalFileName: true,
         finalFileName: true,
@@ -200,12 +212,24 @@ export class CertificationService {
             signatures: true,
           },
         },
+        requiredSigners: {
+          where: {
+            userId,
+          },
+          select: {
+            status: true,
+            order: true,
+          },
+        },
       },
     });
 
     return {
       documents: documents.map((item) => ({
         id: item.id,
+        accessType: item.userId === userId ? 'OWNER' : 'SIGNER',
+        signerStatus: item.requiredSigners[0]?.status ?? null,
+        signerOrder: item.requiredSigners[0]?.order ?? null,
         status: item.status,
         originalFileName: item.originalFileName,
         finalFileName: item._count.signatures > 0 ? item.finalFileName : null,
@@ -229,6 +253,196 @@ export class CertificationService {
 
   async getIpfsFile(cid: string) {
     return this.ipfsService.fetchFile(cid);
+  }
+
+  async listNotifications(userId: string) {
+    const [assignedDocuments, ownerDocuments] = await Promise.all([
+      this.prisma.documentSigner.findMany({
+        where: {
+          userId,
+          status: 'PENDING',
+          document: {
+            status: {
+              in: ['PENDING_SIGNATURES', 'PARTIALLY_SIGNED'],
+            },
+          },
+        },
+        orderBy: [{ order: 'asc' }, { updatedAt: 'desc' }],
+        select: {
+          id: true,
+          order: true,
+          updatedAt: true,
+          document: {
+            select: {
+              id: true,
+              status: true,
+              originalFileName: true,
+              finalFileName: true,
+              user: {
+                select: {
+                  displayName: true,
+                  email: true,
+                  identity: {
+                    select: {
+                      fullName: true,
+                    },
+                  },
+                },
+              },
+              requiredSigners: {
+                orderBy: [{ order: 'asc' }, { createdAt: 'asc' }],
+                select: {
+                  userId: true,
+                  status: true,
+                  order: true,
+                },
+              },
+            },
+          },
+        },
+      }),
+      this.prisma.document.findMany({
+        where: {
+          userId,
+          OR: [
+            { status: 'FULLY_SIGNED' },
+            { status: 'REVOKED' },
+            {
+              requiredSigners: {
+                some: {
+                  status: 'DECLINED',
+                },
+              },
+            },
+          ],
+        },
+        orderBy: { updatedAt: 'desc' },
+        take: 10,
+        select: {
+          id: true,
+          status: true,
+          originalFileName: true,
+          finalFileName: true,
+          updatedAt: true,
+          requiredSigners: {
+            where: {
+              status: 'DECLINED',
+            },
+            take: 1,
+            select: {
+              declineReason: true,
+              user: {
+                select: {
+                  displayName: true,
+                  email: true,
+                  identity: {
+                    select: {
+                      fullName: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      }),
+    ]);
+
+    const actionableAssignments = assignedDocuments.filter((assignment) => {
+      const currentOrder = assignment.order ?? Number.MAX_SAFE_INTEGER;
+      return assignment.document.requiredSigners.every((signer) => {
+        const signerOrder = signer.order ?? Number.MAX_SAFE_INTEGER;
+        return signer.userId === userId || signerOrder >= currentOrder || signer.status === 'SIGNED';
+      });
+    });
+
+    const signNotifications = actionableAssignments.map((assignment) => {
+      const documentTitle =
+        assignment.document.originalFileName ??
+        assignment.document.finalFileName ??
+        'Dokumen PDF';
+      const ownerName =
+        assignment.document.user?.identity?.fullName ??
+        assignment.document.user?.displayName ??
+        assignment.document.user?.email ??
+        'Pemilik dokumen';
+
+      return {
+        id: `sign-${assignment.id}`,
+        type: 'SIGN_REQUIRED',
+        priority: 'HIGH',
+        title: 'Dokumen perlu ditandatangani',
+        description: `${documentTitle} dari ${ownerName} menunggu tanda tangan Anda.`,
+        href: '/certification/assigned',
+        documentId: assignment.document.id,
+        documentTitle,
+        createdAt: assignment.updatedAt,
+      };
+    });
+
+    const ownerNotifications = ownerDocuments.map((document) => {
+      const documentTitle =
+        document.originalFileName ?? document.finalFileName ?? 'Dokumen PDF';
+      const declinedSigner = document.requiredSigners[0];
+      const declinedSignerName = declinedSigner
+        ? declinedSigner.user.identity?.fullName ??
+          declinedSigner.user.displayName ??
+          declinedSigner.user.email
+        : null;
+
+      if (declinedSigner) {
+        return {
+          id: `declined-${document.id}`,
+          type: 'DOCUMENT_DECLINED',
+          priority: 'HIGH',
+          title: 'Dokumen ditolak penandatangan',
+          description: `${documentTitle} ditolak${declinedSignerName ? ` oleh ${declinedSignerName}` : ''}.`,
+          href: `/documents/${document.id}`,
+          documentId: document.id,
+          documentTitle,
+          createdAt: document.updatedAt,
+        };
+      }
+
+      if (document.status === 'REVOKED') {
+        return {
+          id: `revoked-${document.id}`,
+          type: 'DOCUMENT_REVOKED',
+          priority: 'MEDIUM',
+          title: 'Dokumen dicabut',
+          description: `${documentTitle} sudah dicabut dan tidak berlaku lagi.`,
+          href: `/documents/${document.id}`,
+          documentId: document.id,
+          documentTitle,
+          createdAt: document.updatedAt,
+        };
+      }
+
+      return {
+        id: `final-${document.id}`,
+        type: 'DOCUMENT_FINAL',
+        priority: 'MEDIUM',
+        title: 'Dokumen sudah final',
+        description: `${documentTitle} sudah selesai ditandatangani.`,
+        href: `/documents/${document.id}`,
+        documentId: document.id,
+        documentTitle,
+        createdAt: document.updatedAt,
+      };
+    });
+
+    const notifications = [...signNotifications, ...ownerNotifications]
+      .sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      )
+      .slice(0, 10);
+
+    return {
+      unreadCount: signNotifications.length,
+      actionRequiredCount: signNotifications.length,
+      notifications,
+    };
   }
 
   async listAssignedDocuments(userId: string) {

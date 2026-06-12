@@ -23,6 +23,14 @@ export function DocumentTable({
     onDownloadOriginal,
     onDownloadIpfs,
 }: DocumentTableProps) {
+    const getActionHref = (doc: OwnedDocumentItem) => {
+        if (doc.accessType === 'SIGNER') {
+            return '/certification/assigned';
+        }
+
+        return buildCertificationStepHref(getDocumentNextCertificationStep(doc.status, doc.requiredSignerCount), doc.id);
+    };
+
     const sortLabel = (key: 'name' | 'updatedAt' | 'status', label: string) => (
         <button
             type="button"
@@ -63,7 +71,9 @@ export function DocumentTable({
                                                     {doc.originalFileName ?? doc.finalFileName ?? 'Dokumen PDF'}
                                                 </p>
                                                 <p className="mt-1 text-xs text-slate-500">
-                                                    {doc.hasVerificationQr ? 'QR verifikasi tersedia' : 'QR verifikasi belum ada'}
+                                                    {doc.accessType === 'SIGNER'
+                                                        ? `Perlu ditandatangani${doc.signerOrder ? ` - urutan ${doc.signerOrder}` : ''}`
+                                                        : doc.hasVerificationQr ? 'QR verifikasi tersedia' : 'QR verifikasi belum ada'}
                                                 </p>
                                             </div>
                                         </div>
@@ -103,9 +113,9 @@ export function DocumentTable({
                                                     <Download className="h-3.5 w-3.5" /> Final IPFS
                                                 </Button>
                                             ) : null}
-                                            <Link href={buildCertificationStepHref(getDocumentNextCertificationStep(doc.status, doc.requiredSignerCount), doc.id)}>
+                                            <Link href={getActionHref(doc)}>
                                                 <Button size="sm" className="h-8 rounded-lg bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-bold shadow-md shadow-indigo-600/10 hover:shadow-indigo-600/20 transition-all">
-                                                    Lanjut <ArrowRight className="h-3.5 w-3.5 ml-0.5 group-hover:translate-x-0.5 transition-transform" />
+                                                    {doc.accessType === 'SIGNER' ? 'Sign' : 'Lanjut'} <ArrowRight className="h-3.5 w-3.5 ml-0.5 group-hover:translate-x-0.5 transition-transform" />
                                                 </Button>
                                             </Link>
                                         </div>

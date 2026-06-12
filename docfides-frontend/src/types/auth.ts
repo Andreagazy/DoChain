@@ -310,6 +310,9 @@ export interface UploadDocumentResponse {
 
 export interface OwnedDocumentItem {
   id: string;
+  accessType?: 'OWNER' | 'SIGNER';
+  signerStatus?: string | null;
+  signerOrder?: number | null;
   status: string;
   originalFileName: string | null;
   finalFileName: string | null;
@@ -396,6 +399,32 @@ export interface AssignedDocumentItem {
 
 export interface AssignedDocumentsResponse {
   assignments: AssignedDocumentItem[];
+}
+
+export type NotificationType =
+  | 'SIGN_REQUIRED'
+  | 'DOCUMENT_DECLINED'
+  | 'DOCUMENT_REVOKED'
+  | 'DOCUMENT_FINAL';
+
+export type NotificationPriority = 'HIGH' | 'MEDIUM' | 'LOW';
+
+export interface NotificationItem {
+  id: string;
+  type: NotificationType;
+  priority: NotificationPriority;
+  title: string;
+  description: string;
+  href: string;
+  documentId: string | null;
+  documentTitle: string | null;
+  createdAt: string;
+}
+
+export interface NotificationsResponse {
+  unreadCount: number;
+  actionRequiredCount: number;
+  notifications: NotificationItem[];
 }
 
 export interface SignerCandidate {

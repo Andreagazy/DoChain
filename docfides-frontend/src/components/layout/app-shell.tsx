@@ -1,15 +1,17 @@
 'use client';
 
-import { ReactNode, useEffect, useRef } from 'react';
+import { ReactNode, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AppSidebar } from '@/components/layout/app-sidebar';
 import { AppTopbar } from '@/components/layout/app-topbar';
+import { listNotifications } from '@/lib/auth-service';
 import {
     clearAuthSession,
     getStoredToken,
     isAuthSessionIdleExpired,
     recordAuthActivity,
 } from '@/lib/auth-session';
+import type { NotificationsResponse } from '@/types/auth';
 
 interface AppShellProps {
     title: string;
@@ -20,6 +22,11 @@ interface AppShellProps {
 export function AppShell({ title, subtitle, children }: AppShellProps) {
     const router = useRouter();
     const lastActivityWriteRef = useRef(0);
+    const [notifications, setNotifications] = useState<NotificationsResponse>({
+        unreadCount: 0,
+        actionRequiredCount: 0,
+        notifications: [],
+    });
 
     useEffect(() => {
         const expireSession = () => {
@@ -77,6 +84,39 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
         };
     }, [router]);
 
+    useEffect(() => {
+        let ignore = false;
+
+        const loadNotifications = async () => {
+            if (!getStoredToken()) return;
+
+            try {
+                const response = await listNotifications();
+                if (!ignore) {
+                    setNotifications(response);
+                }
+            } catch {
+                if (!ignore) {
+                    setNotifications({
+                        unreadCount: 0,
+                        actionRequiredCount: 0,
+                        notifications: [],
+                    });
+                }
+            }
+        };
+
+        void loadNotifications();
+        const interval = window.setInterval(loadNotifications, 60_000);
+        window.addEventListener('focus', loadNotifications);
+
+        return () => {
+            ignore = true;
+            window.clearInterval(interval);
+            window.removeEventListener('focus', loadNotifications);
+        };
+    }, []);
+
     return (
         <div className="relative min-h-screen bg-slate-50/40 text-slate-950 overflow-hidden">
             <div className="pointer-events-none fixed inset-y-0 left-0 z-0 hidden w-66 border-r border-slate-200/60 bg-white/90 backdrop-blur-md lg:block" />
@@ -87,9 +127,9 @@ export function AppShell({ title, subtitle, children }: AppShellProps) {
             <div className="pointer-events-none absolute top-1/2 left-1/3 h-[400px] w-[400px] rounded-full bg-emerald-500/2 blur-3xl animate-pulse animate-float-reverse-slow" />
 
             <div className="flex min-h-screen relative z-10">
-                <AppSidebar />
+                <AppSidebar actionRequiredCount={notifications.actionRequiredCount} />
                 <div className="flex min-h-screen flex-1 flex-col">
-                    <AppTopbar title={title} subtitle={subtitle} />
+                    <AppTopbar title={title} subtitle={subtitle} notifications={notifications} />
                     <main className="flex-1 px-4 py-5 md:px-6 lg:px-8">
                         <div className="mx-auto w-full max-w-7xl">{children}</div>
                     </main>

@@ -41,7 +41,11 @@ function getActiveHref(pathname: string, items: Array<{ href: string }>) {
         .sort((a, b) => b.href.length - a.href.length)[0]?.href;
 }
 
-export function AppSidebar() {
+interface AppSidebarProps {
+    actionRequiredCount?: number;
+}
+
+export function AppSidebar({ actionRequiredCount = 0 }: AppSidebarProps) {
     const pathname = usePathname();
     const user = getUser();
     const visibleNavItems = user?.role === 'SUPERADMIN'
@@ -83,7 +87,12 @@ export function AppSidebar() {
                                 <span className="absolute left-0 top-[30%] h-[40%] w-1 rounded-full bg-indigo-600" />
                             )}
                             <Icon className={`h-4.5 w-4.5 transition-transform duration-200 group-hover:scale-110 ${isActive ? 'text-indigo-600' : 'text-slate-400 group-hover:text-slate-700'}`} />
-                            <span>{item.label}</span>
+                            <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                            {item.href === '/certification/assigned' && actionRequiredCount > 0 ? (
+                                <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white">
+                                    {actionRequiredCount > 99 ? '99+' : actionRequiredCount}
+                                </span>
+                            ) : null}
                         </Link>
                     );
                 })}

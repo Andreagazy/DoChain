@@ -52,6 +52,7 @@ import {
     RevokeAdminDocumentPayload,
     RevokeAdminDocumentResponse,
     IpfsStatusResponse,
+    NotificationsResponse,
     UpdateProfilePayload,
     IdentityChangeRequestItem,
     AcademicProfileChangePayload,
@@ -325,6 +326,11 @@ export const getCertificationDocumentDetail = async (
 
 export const listAssignedCertificationDocuments = async (): Promise<AssignedDocumentsResponse> => {
     const response = await api.get<AssignedDocumentsResponse>('/certification/documents/assigned');
+    return response.data;
+};
+
+export const listNotifications = async (): Promise<NotificationsResponse> => {
+    const response = await api.get<NotificationsResponse>('/certification/notifications');
     return response.data;
 };
 

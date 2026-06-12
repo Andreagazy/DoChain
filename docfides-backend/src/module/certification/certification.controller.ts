@@ -90,6 +90,11 @@ export class CertificationController {
     return this.certificationService.listAssignedDocuments(req.user.userId);
   }
 
+  @Get('notifications')
+  async listNotifications(@Req() req: RequestWithUser) {
+    return this.certificationService.listNotifications(req.user.userId);
+  }
+
   @Get('documents/:documentId')
   async getDocumentDetail(
     @Req() req: RequestWithUser,
