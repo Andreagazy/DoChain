@@ -86,7 +86,7 @@ export default function CertificationAssignedDocumentsPage() {
     const [loadingAction, setLoadingAction] = useState('');
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
-    const [preferredMode, setPreferredMode] = useState<'visible' | 'invisible'>('invisible');
+    const [preferredMode, setPreferredMode] = useState<'visible' | 'invisible'>('visible');
     const [hasSignature, setHasSignature] = useState(false);
     const [assignments, setAssignments] = useState<AssignedDocumentItem[]>([]);
     const [previewState, setPreviewState] = useState<DocumentPreviewState | null>(null);
@@ -153,7 +153,7 @@ export default function CertificationAssignedDocumentsPage() {
                     return;
                 }
 
-                setPreferredMode(signatureStatus.preferredSignatureMode);
+                setPreferredMode('visible');
                 setHasSignature(signatureStatus.hasSignature);
                 setAssignments(assignmentResponse.assignments);
             } catch (err) {
@@ -224,7 +224,7 @@ export default function CertificationAssignedDocumentsPage() {
             return;
         }
 
-        if (preferredMode === 'visible' && !hasSignature) {
+        if (!hasSignature) {
             router.push('/signature-setup?next=/certification');
             return;
         }
@@ -239,7 +239,7 @@ export default function CertificationAssignedDocumentsPage() {
     const handleAssignedSign = async (documentId: string) => {
         await execute('Sign Dokumen', async () => {
             await signDocumentCertification(documentId, {
-                mode: preferredMode,
+                mode: 'visible',
                 reason: 'DOCChain digital signature',
             });
             setSignDialog(null);
@@ -355,7 +355,7 @@ export default function CertificationAssignedDocumentsPage() {
                             <div className="flex items-start justify-between gap-3">
                                 <div>
                                     <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Mode TTD</p>
-                                    <p className="mt-2 text-xl font-bold text-slate-900">{preferredMode === 'visible' ? 'Visible' : 'Invisible'}</p>
+                                    <p className="mt-2 text-xl font-bold text-slate-900">Visible</p>
                                     <p className="mt-1 text-xs text-slate-600">{hasSignature ? 'Asset siap' : 'Perlu setup'}</p>
                                 </div>
                                 <span className="rounded-xl bg-blue-50 p-2 text-blue-700">

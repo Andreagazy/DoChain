@@ -44,7 +44,7 @@ function CertificationPlaceholdersContent() {
 
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [currentUserFullName, setCurrentUserFullName] = useState<string | null>(null);
-    const [preferredMode, setPreferredMode] = useState<'visible' | 'invisible'>('invisible');
+    const [preferredMode, setPreferredMode] = useState<'visible' | 'invisible'>('visible');
     const [hasSignature, setHasSignature] = useState(false);
     const [myDocuments, setMyDocuments] = useState<OwnedDocumentItem[]>([]);
     const [signerCandidates, setSignerCandidates] = useState<SignerCandidate[]>([]);
@@ -89,7 +89,10 @@ function CertificationPlaceholdersContent() {
             });
         }
 
-        return options;
+        return options.map((item) => ({
+            ...item,
+            preferredSignatureMode: 'visible' as const,
+        }));
     }, [currentUser, currentUserFullName, preferredMode, signerCandidates]);
 
     const signerPreferenceById = useMemo(
@@ -135,7 +138,7 @@ function CertificationPlaceholdersContent() {
                     return;
                 }
 
-                setPreferredMode(signatureStatus.preferredSignatureMode);
+                setPreferredMode('visible');
                 setHasSignature(signatureStatus.hasSignature);
                 setCurrentUserFullName(identityProfile.fullName ?? null);
                 setMyDocuments(documents.documents);
@@ -654,7 +657,7 @@ function CertificationPlaceholdersContent() {
                                                             <p className="mt-1 truncate text-xs text-slate-600">{signer.academicProfile.label ?? signer.academicProfile.unitName}</p>
                                                         ) : null}
                                                     </div>
-                                                    <Badge variant={isVisibleSigner ? 'success' : 'neutral'}>{isVisibleSigner ? 'Visible' : 'Invisible'}</Badge>
+                                                    <Badge variant="success">Visible</Badge>
                                                 </div>
                                                 <p className="mt-2 text-xs text-slate-600">
                                                     {isVisibleSigner ? `Posisi ${placeholder ? `page ${placeholder.visiblePage}` : 'belum ditentukan'}` : 'Tidak perlu posisi.'}

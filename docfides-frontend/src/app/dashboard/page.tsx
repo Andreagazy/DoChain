@@ -28,6 +28,7 @@ import { StatCard } from '@/components/common/stat-card';
 import api from '@/lib/axios';
 import {
   getIdentityStatus,
+  getSignatureStatus,
   listAssignedCertificationDocuments,
   listMyCertificationDocuments,
   logout,
@@ -107,6 +108,7 @@ export default function DashboardPage() {
   const [identityStatus, setIdentityStatus] = useState<IdentityStatus>('NOT_SUBMITTED');
   const [ownedDocuments, setOwnedDocuments] = useState<OwnedDocumentItem[]>([]);
   const [assignedDocuments, setAssignedDocuments] = useState<AssignedDocumentItem[]>([]);
+  const [hasSignature, setHasSignature] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -132,15 +134,18 @@ export default function DashboardPage() {
         setIdentityStatus(statusRes.status);
 
         if (statusRes.status === 'APPROVED') {
-          const [ownedRes, assignedRes] = await Promise.all([
+          const [ownedRes, assignedRes, signatureRes] = await Promise.all([
             listMyCertificationDocuments(),
             listAssignedCertificationDocuments(),
+            getSignatureStatus(),
           ]);
           setOwnedDocuments(ownedRes.documents);
           setAssignedDocuments(assignedRes.assignments);
+          setHasSignature(signatureRes.hasSignature);
         } else {
           setOwnedDocuments([]);
           setAssignedDocuments([]);
+          setHasSignature(false);
         }
       } catch (err) {
         const axiosError = err as AxiosError;
@@ -191,6 +196,15 @@ export default function DashboardPage() {
           description: 'Sertifikasi dokumen baru dapat dilakukan setelah identitas disetujui.',
           href: '/profile#identitas-ktp',
           label: 'Buka Profil',
+          tone: 'amber',
+        }
+      : null,
+    identityStatus === 'APPROVED' && !hasSignature
+      ? {
+          title: 'Atur tanda tangan terlebih dahulu',
+          description: 'Upload dan simpan gambar tanda tangan visible sebelum membuat atau menandatangani dokumen.',
+          href: '/signature-setup?next=/dashboard',
+          label: 'Atur Tanda Tangan',
           tone: 'amber',
         }
       : null,
@@ -295,6 +309,20 @@ export default function DashboardPage() {
               </span>
               <Button asChild className="w-fit shrink-0 bg-amber-600 text-white hover:bg-amber-700">
                 <Link href="/profile#identitas-ktp">Verifikasi di Profil</Link>
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
+        {identityStatus === 'APPROVED' && !hasSignature ? (
+          <Alert className="border-blue-200 bg-blue-50 text-blue-900">
+            <PenSquare className="h-4 w-4 text-blue-700" />
+            <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <span>
+                Identitas Anda sudah terverifikasi. Sebelum melakukan sertifikasi atau menandatangani dokumen, upload dan simpan tanda tangan visible terlebih dahulu.
+              </span>
+              <Button asChild className="w-fit shrink-0 bg-blue-600 text-white hover:bg-blue-700">
+                <Link href="/signature-setup?next=/dashboard">Atur Tanda Tangan</Link>
               </Button>
             </AlertDescription>
           </Alert>

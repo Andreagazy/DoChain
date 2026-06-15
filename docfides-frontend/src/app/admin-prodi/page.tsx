@@ -9,7 +9,9 @@ import {
   FileSignature, UserCheck, FileClock, FileX2, PenSquare, FolderOpen,
 } from 'lucide-react';
 import { AppShell } from '@/components/layout/app-shell';
-import { getUser } from '@/lib/auth-service';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Button } from '@/components/ui/button';
+import { getSignatureStatus, getUser } from '@/lib/auth-service';
 import api from '@/lib/axios';
 
 /* ─── Types ─────────────────────────────────────────── */
@@ -112,6 +114,7 @@ export default function AdminProdiDashboardPage() {
   const router = useRouter();
   const currentUser = useMemo(() => getUser(), []);
   const [stats, setStats] = useState<AdminProdiStats | null>(null);
+  const [hasSignature, setHasSignature] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -123,11 +126,16 @@ export default function AdminProdiDashboardPage() {
     async function loadStats() {
       try {
         // Fetch data from available endpoints
-        const [docsRes, identitiesRes, usersRes] = await Promise.allSettled([
+        const [docsRes, identitiesRes, usersRes, signatureRes] = await Promise.allSettled([
           api.get('/admin/documents?limit=200'),
           api.get('/admin/identities?status=PENDING&limit=10'),
           api.get('/admin/users?limit=1'),
+          getSignatureStatus(),
         ]);
+
+        if (signatureRes.status === 'fulfilled') {
+          setHasSignature(signatureRes.value.hasSignature);
+        }
 
         let totalDocuments = 0;
         let pendingDocuments = 0;
@@ -246,6 +254,20 @@ export default function AdminProdiDashboardPage() {
         </section>
 
         {/* ── Stat Cards ── */}
+        {!hasSignature ? (
+          <Alert className="border-blue-200 bg-blue-50 text-blue-900">
+            <FileSignature className="h-4 w-4 text-blue-700" />
+            <AlertDescription className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <span>
+                Tanda tangan visible belum disiapkan. Atur tanda tangan terlebih dahulu sebelum membuat atau menandatangani dokumen.
+              </span>
+              <Button asChild className="w-fit shrink-0 bg-blue-600 text-white hover:bg-blue-700">
+                <Link href="/signature-setup?next=/admin-prodi">Atur Tanda Tangan</Link>
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
         <section className="grid grid-cols-2 gap-4 xl:grid-cols-4">
           <StatCard
             label="Total Dokumen"

@@ -15,7 +15,7 @@ export enum SignatureMode {
 
 export class SignDocumentDto {
   @IsEnum(SignatureMode)
-  mode: SignatureMode = SignatureMode.INVISIBLE;
+  mode: SignatureMode = SignatureMode.VISIBLE;
 
   @IsOptional()
   @IsString()

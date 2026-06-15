@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  ForbiddenException,
   Post,
   HttpCode,
   HttpStatus,
@@ -71,20 +72,25 @@ export class AuthController {
 
   @Post('request-otp')
   @HttpCode(HttpStatus.OK)
-  async requestOtp(@Body() dto: RequestOtpDto) {
-    await this.authService.requestOtp(dto.email);
-    return { message: 'Kode OTP telah dikirim ke email Anda' };
+  requestOtp(@Body() _dto: RequestOtpDto) {
+    throw new ForbiddenException(
+      'Pendaftaran mandiri dinonaktifkan. Silakan hubungi admin prodi atau superadmin untuk pembuatan akun.',
+    );
   }
 
   @Post('verify-otp')
   @HttpCode(HttpStatus.OK)
-  async verifyOtp(@Body() dto: VerifyOtpDto) {
-    return this.authService.verifyOtp(dto.email, dto.otp);
+  verifyOtp(@Body() _dto: VerifyOtpDto) {
+    throw new ForbiddenException(
+      'Pendaftaran mandiri dinonaktifkan. Silakan hubungi admin prodi atau superadmin untuk pembuatan akun.',
+    );
   }
 
   @Post('register')
   @HttpCode(HttpStatus.CREATED)
-  async register(@Body() dto: RegisterDto) {
-    return this.authService.register(dto);
+  register(@Body() _dto: RegisterDto) {
+    throw new ForbiddenException(
+      'Pendaftaran mandiri dinonaktifkan. Silakan hubungi admin prodi atau superadmin untuk pembuatan akun.',
+    );
   }
 }

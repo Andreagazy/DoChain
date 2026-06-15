@@ -7,7 +7,6 @@ import {
   Loader2, AlertCircle, Eye, EyeOff, ShieldCheck, Mail, Lock,
 } from 'lucide-react';
 import { getDefaultHomePath, getProfile, getToken, login, logout, saveAuthData } from '@/lib/auth-service';
-import Link from 'next/link';
 import { AxiosError } from 'axios';
 
 type ApiError = {
@@ -212,22 +211,15 @@ export default function LoginPage() {
               )}
             </button>
 
-            {/* Divider */}
-            <div className="relative my-1 flex items-center">
-              <div className="flex-1 border-t border-gray-200" />
-              <span className="px-3 text-xs text-gray-400">atau</span>
-              <div className="flex-1 border-t border-gray-200" />
+            <div className="flex items-start gap-3 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3">
+              <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+              <div>
+                <p className="text-xs font-semibold text-slate-800">Belum memiliki akun?</p>
+                <p className="mt-1 text-xs leading-5 text-slate-600">
+                  Pembuatan akun dilakukan oleh admin prodi atau superadmin. Silakan hubungi admin sesuai program studi Anda.
+                </p>
+              </div>
             </div>
-
-            {/* Register outline button */}
-            <Link
-              href="/register"
-              id="register-link"
-              className="flex h-12 w-full items-center justify-center rounded-xl border border-gray-200 bg-white text-sm font-semibold text-gray-700 transition-all hover:border-blue-300 hover:text-blue-700"
-            >
-              <ShieldCheck className="mr-2 h-4 w-4 text-blue-500" />
-              Daftar Akun Baru
-            </Link>
           </form>
         </div>
       </div>

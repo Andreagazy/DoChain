@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, ArrowRight, Loader2, MoveDown, MoveUp, Plus, Trash2 } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, Loader2, MoveDown, MoveUp, Plus, Trash2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -47,7 +47,7 @@ function CertificationSignersContent() {
 
     const [currentUser, setCurrentUser] = useState<User | null>(null);
     const [currentUserFullName, setCurrentUserFullName] = useState<string | null>(null);
-    const [preferredMode, setPreferredMode] = useState<'visible' | 'invisible'>('invisible');
+    const [preferredMode, setPreferredMode] = useState<'visible' | 'invisible'>('visible');
     const [hasSignature, setHasSignature] = useState(false);
     const [myDocuments, setMyDocuments] = useState<OwnedDocumentItem[]>([]);
     const [signerCandidates, setSignerCandidates] = useState<SignerCandidate[]>([]);
@@ -76,7 +76,10 @@ function CertificationSignersContent() {
             });
         }
 
-        const uniqueOptions = Array.from(new Map(options.map((item) => [item.id, item])).values());
+        const uniqueOptions = Array.from(new Map(options.map((item) => [item.id, {
+            ...item,
+            preferredSignatureMode: 'visible' as const,
+        }])).values());
 
         return uniqueOptions.sort((a, b) => {
             const levelA = SIGNER_ROLE_RANK[a.role] ?? 999;
@@ -166,7 +169,7 @@ function CertificationSignersContent() {
                     return;
                 }
 
-                setPreferredMode(signatureStatus.preferredSignatureMode);
+                setPreferredMode('visible');
                 setHasSignature(signatureStatus.hasSignature);
                 setCurrentUserFullName(identityProfile.fullName ?? null);
                 setMyDocuments(documents.documents);
@@ -327,8 +330,12 @@ function CertificationSignersContent() {
                 <CertificationStepper currentStep="signers" documentId={selectedDocumentId} />
 
                 {error ? (
-                    <Alert className="border-red-200 bg-red-50 text-red-800">
-                        <AlertDescription>{error}</AlertDescription>
+                    <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+                        <AlertCircle className="h-4 w-4 text-amber-700" />
+                        <AlertDescription>
+                            <span className="block font-semibold">Perlu tindakan sebelum melanjutkan</span>
+                            <span className="mt-1 block leading-5">{error}</span>
+                        </AlertDescription>
                     </Alert>
                 ) : null}
 
@@ -431,14 +438,14 @@ function CertificationSignersContent() {
                                                 </p>
                                             ) : null}
                                             <p className="text-xs text-slate-600">
-                                                Mode: {isVisibleSigner ? 'Visible' : 'Invisible'}{isVisibleSigner ? `. Placeholder ${placeholder ? `sudah diatur di page ${placeholder.visiblePage}` : 'belum ditentukan'}` : '. Tidak perlu placeholder.'}
+                                                Tanda tangan visible wajib digunakan. Placeholder {placeholder ? `sudah diatur di page ${placeholder.visiblePage}` : 'belum ditentukan'}.
                                             </p>
                                             <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
                                                 Role: {signer?.role ?? '-'}
                                             </p>
                                         </div>
                                         <div className="flex flex-wrap gap-2">
-                                            <Badge variant={isVisibleSigner ? 'success' : 'neutral'}>{isVisibleSigner ? 'Visible' : 'Invisible'}</Badge>
+                                            <Badge variant="success">Visible</Badge>
                                             <Button variant="outline" className="border-slate-300" onClick={() => moveSigner(index, -1)} disabled={!canMoveUp}>
                                                 <MoveUp className="mr-2 h-4 w-4" />
                                                 Naik

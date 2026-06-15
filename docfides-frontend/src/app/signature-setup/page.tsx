@@ -45,7 +45,7 @@ function SignatureSetupContent() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [identityApproved, setIdentityApproved] = useState(false);
-    const [mode, setMode] = useState<'invisible' | 'visible'>('invisible');
+    const [mode, setMode] = useState<'invisible' | 'visible'>('visible');
     const [signatureFile, setSignatureFile] = useState<File | null>(null);
     const [signaturePreviewUrl, setSignaturePreviewUrl] = useState('');
     const [storedSignaturePreviewUrl, setStoredSignaturePreviewUrl] = useState('');
@@ -466,14 +466,14 @@ function SignatureSetupContent() {
             return;
         }
 
-        if (mode === 'visible' && !hasSignature && !signatureFile) {
-            setError('Untuk mode visible, upload gambar tanda tangan terlebih dahulu.');
+        if (!hasSignature && !signatureFile) {
+            setError('Upload gambar tanda tangan terlebih dahulu.');
             return;
         }
 
         setSaving(true);
         try {
-            if (mode === 'visible' && signatureFile) {
+            if (signatureFile) {
                 const croppedFile = await createCroppedSignatureBlob();
                 if (croppedFile) {
                     await uploadSignatureImage(croppedFile);
@@ -481,7 +481,7 @@ function SignatureSetupContent() {
                 setHasSignature(true);
             }
 
-            await updateSignaturePreference(mode);
+            await updateSignaturePreference('visible');
 
             setSuccess('Setup tanda tangan berhasil disimpan.');
             router.push(nextPath);
@@ -504,7 +504,7 @@ function SignatureSetupContent() {
     }
 
     return (
-        <AppShell title="Signature Setup" subtitle="Atur mode tanda tangan default untuk proses sertifikasi.">
+        <AppShell title="Signature Setup" subtitle="Atur gambar tanda tangan visible untuk proses sertifikasi.">
             <div className="space-y-6">
                 <section className="rounded-lg border border-blue-100 bg-white p-6 shadow-sm md:p-8">
                         <Badge variant={identityApproved ? 'success' : 'warning'}>
@@ -512,7 +512,7 @@ function SignatureSetupContent() {
                         </Badge>
                         <h1 className="mt-4 text-2xl font-semibold text-slate-950 md:text-3xl">Setup tanda tangan digital</h1>
                         <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                            Pilih invisible signature untuk signing tanpa gambar, atau visible signature jika tanda tangan perlu tampil pada PDF final.
+                            Semua proses sertifikasi DOCChain menggunakan tanda tangan visible, sehingga gambar tanda tangan wajib disiapkan terlebih dahulu.
                         </p>
                 </section>
 
@@ -546,38 +546,16 @@ function SignatureSetupContent() {
 
                 <Card className="rounded-lg border-blue-100 bg-white shadow-sm">
                     <CardHeader>
-                        <CardTitle className="flex items-center gap-2"><PenLine className="h-5 w-5" /> Pilihan Mode</CardTitle>
+                        <CardTitle className="flex items-center gap-2"><PenLine className="h-5 w-5" /> Tanda Tangan Visible</CardTitle>
                         <CardDescription>
-                            Invisible: langsung sign tanpa gambar. Visible: wajib punya gambar tanda tangan.
+                            Upload tanda tangan PNG/JPG, lalu crop area tanda tangan agar ukurannya sesuai saat ditempel di PDF.
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                            <button
-                                type="button"
-                                onClick={() => setMode('invisible')}
-                                className={`rounded-lg border px-4 py-4 text-left transition ${mode === 'invisible' ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-100' : 'border-slate-200 bg-white hover:border-blue-200'}`}
-                            >
-                                <div className="flex items-center gap-2">
-                                    <EyeOff className="h-4 w-4 text-blue-700" />
-                                    <p className="font-semibold text-slate-950">Invisible Signature</p>
-                                </div>
-                                <p className="text-xs text-slate-600 mt-1">Tidak perlu upload gambar tanda tangan.</p>
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setMode('visible')}
-                                className={`rounded-lg border px-4 py-4 text-left transition ${mode === 'visible' ? 'border-blue-300 bg-blue-50 ring-2 ring-blue-100' : 'border-slate-200 bg-white hover:border-blue-200'}`}
-                            >
-                                <div className="flex items-center gap-2">
-                                    <Eye className="h-4 w-4 text-blue-700" />
-                                    <p className="font-semibold text-slate-950">Visible Signature</p>
-                                </div>
-                                <p className="text-xs text-slate-600 mt-1">Gunakan gambar tanda tangan di PDF.</p>
-                            </button>
+                        <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
+                            Mode aktif: <span className="font-bold">Visible Signature</span>. Tanda tangan akan terlihat pada area placeholder dokumen.
                         </div>
 
-                        {mode === 'visible' && (
                             <div className="space-y-2">
                                 <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
                                     <UploadCloud className="h-4 w-4" />
@@ -707,7 +685,6 @@ function SignatureSetupContent() {
                                     </div>
                                 )}
                             </div>
-                        )}
 
                         <Button disabled={saving || !identityApproved} onClick={handleSave}>
                             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}

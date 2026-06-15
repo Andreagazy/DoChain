@@ -50,7 +50,7 @@ function CertificationReviewContent() {
     const [success, setSuccess] = useState('');
 
     const [currentUser, setCurrentUser] = useState<User | null>(null);
-    const [preferredMode, setPreferredMode] = useState<'visible' | 'invisible'>('invisible');
+    const [preferredMode, setPreferredMode] = useState<'visible' | 'invisible'>('visible');
     const [hasSignature, setHasSignature] = useState(false);
     const [myDocuments, setMyDocuments] = useState<OwnedDocumentItem[]>([]);
     const [selectedDocumentId, setSelectedDocumentId] = useState('');
@@ -84,14 +84,9 @@ function CertificationReviewContent() {
     const signedSignerCount = documentSignerDetails?.signers.filter((signer) => signer.status === 'SIGNED').length ?? 0;
     const totalSignerCount = documentSignerDetails?.signers.length ?? selectedDocument?.requiredSignerCount ?? 0;
     const isFullySigned = selectedDocument?.status === 'FULLY_SIGNED';
-    const canPlaceQrBeforeSigning = Boolean(
-        selectedDocument &&
-        !selectedDocument.hasVerificationQr &&
-        (selectedDocument.signatureCount ?? 0) === 0 &&
-        ['DRAFT', 'PENDING_SIGNATURES'].includes(selectedDocument.status),
-    );
-    const shouldShowQrPlacement = canPlaceQrBeforeSigning;
-    const canShowSignAction = Boolean(selectedDocument?.hasVerificationQr) && !shouldShowQrPlacement;
+    const canPlaceQrBeforeSigning = false;
+    const shouldShowQrPlacement = false;
+    const canShowSignAction = Boolean(selectedDocument) && !isFullySigned;
 
     const refreshSelectedDocumentState = async (documentId: string) => {
         const [documents, signerDetails] = await Promise.all([
@@ -134,7 +129,7 @@ function CertificationReviewContent() {
                     return;
                 }
 
-                setPreferredMode(signatureStatus.preferredSignatureMode);
+                setPreferredMode('visible');
                 setHasSignature(signatureStatus.hasSignature);
                 setMyDocuments(documents.documents);
 
@@ -404,12 +399,7 @@ function CertificationReviewContent() {
             return;
         }
 
-        if (!selectedDocument?.hasVerificationQr) {
-            setError('Tentukan lokasi QR verifikasi terlebih dahulu sebelum sign.');
-            return;
-        }
-
-        if (preferredMode === 'visible' && !hasSignature) {
+        if (!hasSignature) {
             router.push('/signature-setup?next=/certification');
             return;
         }
@@ -420,7 +410,7 @@ function CertificationReviewContent() {
     const handleOwnerSign = async () => {
         await execute('Sign Dokumen', async () => {
             const result = await signDocumentCertification(selectedDocumentId, {
-                mode: preferredMode,
+                mode: 'visible',
                 reason: signingReason,
             });
 
@@ -497,7 +487,7 @@ function CertificationReviewContent() {
     }
 
     return (
-        <AppShell title="Sertifikasi - Review" subtitle="Langkah terakhir: letakkan QR, tinjau konfigurasi, lalu tanda tangani.">
+        <AppShell title="Sertifikasi - Review" subtitle="Langkah terakhir: tinjau konfigurasi, lalu tanda tangani.">
             <div className="flex flex-col gap-6">
                 <CertificationStepper currentStep="review" documentId={selectedDocumentId} />
 
@@ -518,7 +508,7 @@ function CertificationReviewContent() {
                     <Badge className="rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-bold uppercase tracking-wide text-blue-700 hover:bg-white">Review Sertifikasi</Badge>
                     <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-950 md:text-3xl">Tinjau dokumen sebelum tanda tangan.</h1>
                     <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                        Lokasi QR harus disimpan terlebih dahulu. Setelah itu, lanjutkan tanda tangan sesuai status signer.
+                        QR verifikasi akan ditempatkan otomatis pada halaman tanda tangan. Pastikan posisi tanda tangan sudah benar sebelum melanjutkan.
                     </p>
                 </section>
 
@@ -541,7 +531,7 @@ function CertificationReviewContent() {
                             <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
                                 <p className="text-xs uppercase tracking-wide text-slate-500">Sign Status</p>
                                 <p className="mt-1 font-semibold text-slate-900">{signedSignerCount} / {totalSignerCount} sudah sign</p>
-                                <p className="mt-1 text-xs text-slate-500">Mode signing: {preferredMode === 'invisible' ? 'Invisible' : hasSignature ? 'Visible ready' : 'Visible missing'}</p>
+                                <p className="mt-1 text-xs text-slate-500">Mode signing: {hasSignature ? 'Visible ready' : 'Visible missing'}</p>
                             </div>
                         </div>
 
@@ -579,10 +569,6 @@ function CertificationReviewContent() {
                             {isFullySigned ? (
                                 <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800">
                                     Semua signer sudah selesai. Dokumen final sudah tersimpan.
-                                </div>
-                            ) : shouldShowQrPlacement ? (
-                                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-800">
-                                    Pilih dan simpan lokasi QR verifikasi terlebih dahulu. Setelah QR tersimpan, tombol sign akan muncul.
                                 </div>
                             ) : (
                                 <Button className="rounded-xl bg-blue-600 font-semibold text-white hover:bg-blue-700" onClick={openOwnerSignConfirmation} disabled={loadingAction !== '' || !canShowSignAction}>

@@ -25,13 +25,13 @@ const STEPS = [
     {
         key: 'placeholders',
         title: 'Atur Placeholder',
-        description: 'Tempatkan area tanda tangan visible untuk signer yang memerlukannya.',
+        description: 'Tempatkan area tanda tangan visible untuk setiap signer.',
         icon: PencilRuler,
     },
     {
         key: 'review',
         title: 'Review dan Sign',
-        description: 'Letakkan QR verifikasi, tinjau signer, lalu mulai proses tanda tangan.',
+        description: 'Tinjau signer, lalu mulai proses tanda tangan. QR ditempatkan otomatis.',
         icon: PenLine,
     },
 ] as const;
@@ -55,7 +55,7 @@ export default function CertificationPage() {
                                 Sertifikasi dokumen dengan tanda tangan bertingkat.
                             </h1>
                             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
-                                Mulai dari upload PDF, pilih signer, tentukan posisi tanda tangan, letakkan QR verifikasi, lalu selesaikan tanda tangan digital.
+                                Mulai dari upload PDF, pilih signer, tentukan posisi tanda tangan, lalu selesaikan tanda tangan digital. QR verifikasi ditempatkan otomatis oleh sistem.
                             </p>
                         </div>
                         <div className="flex flex-wrap gap-3">

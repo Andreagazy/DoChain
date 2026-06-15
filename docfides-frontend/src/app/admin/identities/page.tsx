@@ -488,19 +488,19 @@ export default function AdminIdentitiesPage() {
                 </Card>
 
                 <Dialog open={Boolean(ktpDialog)} onOpenChange={(open) => !open && closeKtpDialog()}>
-                    <DialogContent className="max-h-[88vh] max-w-[min(92vw,760px)] overflow-hidden rounded-2xl p-0">
+                    <DialogContent className="max-h-[82vh] w-[min(92vw,620px)] overflow-hidden rounded-xl p-0">
                         <DialogHeader className="border-b border-slate-200 px-5 py-4">
                             <DialogTitle>Preview KTP</DialogTitle>
                             <DialogDescription>
                                 {ktpDialog?.identity.fullName ?? '-'} | NIK {ktpDialog?.identity.nik ?? '-'}
                             </DialogDescription>
                         </DialogHeader>
-                        <div className="max-h-[68vh] overflow-auto bg-slate-950 p-4">
+                        <div className="flex max-h-[56vh] min-h-64 items-center justify-center overflow-auto bg-slate-100 p-4">
                             {ktpDialog?.url ? (
                                 <img
                                     src={ktpDialog.url}
                                     alt={`KTP ${ktpDialog.identity.fullName}`}
-                                    className="mx-auto max-h-[64vh] w-auto max-w-full rounded-lg bg-white object-contain"
+                                    className="mx-auto max-h-[52vh] w-auto max-w-full rounded-md bg-white object-contain shadow-sm"
                                 />
                             ) : null}
                         </div>
@@ -513,19 +513,19 @@ export default function AdminIdentitiesPage() {
                 </Dialog>
 
                 <Dialog open={Boolean(changeRequestKtpDialog)} onOpenChange={(open) => !open && closeChangeRequestKtpDialog()}>
-                    <DialogContent className="max-h-[88vh] max-w-[min(92vw,760px)] overflow-hidden rounded-2xl p-0">
+                    <DialogContent className="max-h-[82vh] w-[min(92vw,620px)] overflow-hidden rounded-xl p-0">
                         <DialogHeader className="border-b border-slate-200 px-5 py-4">
                             <DialogTitle>Preview KTP Request Perubahan</DialogTitle>
                             <DialogDescription>
                                 {changeRequestKtpDialog?.request.fullName ?? '-'} | NIK {changeRequestKtpDialog?.request.nik ?? '-'}
                             </DialogDescription>
                         </DialogHeader>
-                        <div className="max-h-[68vh] overflow-auto bg-slate-950 p-4">
+                        <div className="flex max-h-[56vh] min-h-64 items-center justify-center overflow-auto bg-slate-100 p-4">
                             {changeRequestKtpDialog?.url ? (
                                 <img
                                     src={changeRequestKtpDialog.url}
                                     alt={`KTP ${changeRequestKtpDialog.request.fullName}`}
-                                    className="mx-auto max-h-[64vh] w-auto max-w-full rounded-lg bg-white object-contain"
+                                    className="mx-auto max-h-[52vh] w-auto max-w-full rounded-md bg-white object-contain shadow-sm"
                                 />
                             ) : null}
                         </div>

@@ -352,7 +352,11 @@ export class CertificationService {
       const currentOrder = assignment.order ?? Number.MAX_SAFE_INTEGER;
       return assignment.document.requiredSigners.every((signer) => {
         const signerOrder = signer.order ?? Number.MAX_SAFE_INTEGER;
-        return signer.userId === userId || signerOrder >= currentOrder || signer.status === 'SIGNED';
+        return (
+          signer.userId === userId ||
+          signerOrder >= currentOrder ||
+          signer.status === 'SIGNED'
+        );
       });
     });
 
@@ -385,9 +389,9 @@ export class CertificationService {
         document.originalFileName ?? document.finalFileName ?? 'Dokumen PDF';
       const declinedSigner = document.requiredSigners[0];
       const declinedSignerName = declinedSigner
-        ? declinedSigner.user.identity?.fullName ??
+        ? (declinedSigner.user.identity?.fullName ??
           declinedSigner.user.displayName ??
-          declinedSigner.user.email
+          declinedSigner.user.email)
         : null;
 
       if (declinedSigner) {
@@ -587,7 +591,9 @@ export class CertificationService {
     );
 
     if (!isOwner && !isAssignedSigner) {
-      throw new NotFoundException('Dokumen tidak ditemukan atau bukan akses Anda');
+      throw new NotFoundException(
+        'Dokumen tidak ditemukan atau bukan akses Anda',
+      );
     }
 
     return {
@@ -888,23 +894,18 @@ export class CertificationService {
         role: user.role,
         signerLevel: SIGNER_ROLE_RANK[user.role] ?? 999,
         academicProfile: this.buildSignerAcademicProfile(user),
-        preferredSignatureMode: user.preferredSignatureMode.toLowerCase(),
+        preferredSignatureMode: 'visible',
       })),
     };
   }
 
   async getSignatureStatus(userId: string) {
     const signaturePath = this.resolveSignatureImagePath(userId);
-    const profile = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { preferredSignatureMode: true },
-    });
-    const preferredMode = profile?.preferredSignatureMode ?? 'INVISIBLE';
     if (!signaturePath) {
       return {
         hasSignature: false,
         signature: null,
-        preferredSignatureMode: preferredMode.toLowerCase(),
+        preferredSignatureMode: 'visible',
       };
     }
 
@@ -914,7 +915,7 @@ export class CertificationService {
         fileName: signaturePath.split(/[\\/]/).pop() ?? null,
         storagePath: signaturePath,
       },
-      preferredSignatureMode: preferredMode.toLowerCase(),
+      preferredSignatureMode: 'visible',
     };
   }
 
@@ -928,7 +929,9 @@ export class CertificationService {
     const fileName = signaturePath.split(/[\\/]/).pop() ?? 'signature.png';
     const extension = extname(fileName).toLowerCase();
     const mimeType =
-      extension === '.jpg' || extension === '.jpeg' ? 'image/jpeg' : 'image/png';
+      extension === '.jpg' || extension === '.jpeg'
+        ? 'image/jpeg'
+        : 'image/png';
 
     return {
       fileName,
@@ -941,15 +944,10 @@ export class CertificationService {
     userId: string,
     dto: UpdateSignaturePreferenceDto,
   ) {
-    const preferredSignatureMode =
-      dto.mode === SignatureMode.VISIBLE
-        ? 'VISIBLE'
-        : 'INVISIBLE';
-
     const updated = await this.prisma.user.update({
       where: { id: userId },
       data: {
-        preferredSignatureMode,
+        preferredSignatureMode: 'VISIBLE',
       },
       select: {
         id: true,
@@ -979,7 +977,14 @@ export class CertificationService {
         status: true,
         originalFileName: true,
         originalFileHash: true,
+        finalFileName: true,
+        finalFileHash: true,
         qrCodePage: true,
+        _count: {
+          select: {
+            signatures: true,
+          },
+        },
       },
     });
 
@@ -999,9 +1004,9 @@ export class CertificationService {
       );
     }
 
-    if (document.qrCodePage != null) {
+    if (document._count.signatures > 0) {
       throw new BadRequestException(
-        'QR verifikasi sudah ditempatkan. Ubah signer/placeholder sebelum menyimpan QR.',
+        'Signer dan posisi tanda tangan tidak dapat diubah setelah proses tanda tangan dimulai.',
       );
     }
 
@@ -1123,15 +1128,9 @@ export class CertificationService {
       existingSigners.map((signer) => [signer.userId, signer]),
     );
 
-    const modeByUserId = new Map(
-      users.map((user) => [user.id, user.preferredSignatureMode]),
-    );
-
     const requestedSignersWithMode = signerIds.map((userId) => ({
       userId,
-      preferredSignatureMode: (modeByUserId.get(userId) ?? 'INVISIBLE') as
-        | 'VISIBLE'
-        | 'INVISIBLE',
+      preferredSignatureMode: 'VISIBLE' as const,
     }));
 
     const result = await this.prisma.$transaction(async (tx) => {
@@ -1146,18 +1145,8 @@ export class CertificationService {
       for (const [index, signerUserId] of signerIds.entries()) {
         const existingSigner = existingByUserId.get(signerUserId);
         const requestedOrder = index + 1;
-        const preferredMode = modeByUserId.get(signerUserId) ?? 'INVISIBLE';
-
-        if (preferredMode === 'VISIBLE' && !placeholderMap.has(signerUserId)) {
-          throw new BadRequestException(
-            'Signer dengan mode visible wajib memiliki posisi placeholder',
-          );
-        }
-
         const requestedPlaceholder =
-          preferredMode === 'VISIBLE'
-            ? (placeholderMap.get(signerUserId) ?? this.emptyPlaceholder())
-            : this.emptyPlaceholder();
+          placeholderMap.get(signerUserId) ?? this.emptyPlaceholder();
 
         if (!existingSigner) {
           const created = await tx.documentSigner.create({
@@ -1282,68 +1271,89 @@ export class CertificationService {
     });
 
     // Pre-render all visible signature appearances to prevent breaking incremental signing
-    const hasVisibleSigners = requestedSignersWithMode.some(
-      (s) => s.preferredSignatureMode === 'VISIBLE',
+    const visibleSignerIds = requestedSignersWithMode.map(
+      (item) => item.userId,
     );
-    if (hasVisibleSigners) {
-      const visibleSignerIds = requestedSignersWithMode
-        .filter((item) => item.preferredSignatureMode === 'VISIBLE')
-        .map((item) => item.userId);
 
-      const missingSignatureImages = visibleSignerIds.filter(
-        (signerUserId) => !this.resolveSignatureImagePath(signerUserId),
-      );
+    const missingSignatureImages = visibleSignerIds.filter(
+      (signerUserId) => !this.resolveSignatureImagePath(signerUserId),
+    );
 
-      if (missingSignatureImages.length > 0) {
-        throw new BadRequestException(
-          `Signer visible wajib upload signature image terlebih dahulu: ${missingSignatureImages.join(', ')}`,
+    if (missingSignatureImages.length > 0) {
+      const missingSignerNames = missingSignatureImages.map((signerUserId) => {
+        const signer = userById.get(signerUserId);
+        return (
+          signer?.identity?.fullName ??
+          signer?.displayName ??
+          signer?.email ??
+          'Signer'
         );
-      }
+      });
 
-      const sourceDocumentPath = this.resolveDocumentPath(
-        document.userId ?? requesterUserId,
-        {
-          finalFileName: null,
-          originalFileName: document.originalFileName ?? `${documentId}.pdf`,
-          finalFileHash: null,
-          originalFileHash: document.originalFileHash,
-        },
+      throw new BadRequestException(
+        `Tanda tangan belum tersedia untuk: ${missingSignerNames.join(', ')}. Minta signer tersebut membuka menu Tanda Tangan dan menyimpan tanda tangannya terlebih dahulu.`,
       );
+    }
 
-      const sourcePdfBuffer = readFileSync(sourceDocumentPath);
-      const preRenderedBuffer = await this.preRenderAllVisibleAppearances(
+    const sourceDocumentPath = this.resolveDocumentPath(
+      document.userId ?? requesterUserId,
+      {
+        finalFileName: null,
+        originalFileName: document.originalFileName ?? `${documentId}.pdf`,
+        finalFileHash: null,
+        originalFileHash: document.originalFileHash,
+      },
+    );
+
+    const sourcePdfBuffer = readFileSync(sourceDocumentPath);
+    const qrPlacement = await this.buildAutomaticQrPlacement(
+      sourcePdfBuffer,
+      result.processed.find((item) => item.placeholder.visiblePage != null)
+        ?.placeholder ??
+        result.processed[0]?.placeholder ??
+        null,
+    );
+    const qrRenderedBuffer = Buffer.from(
+      await this.renderVerificationQrCode(
         sourcePdfBuffer,
         documentId,
-        requestedSignersWithMode,
+        qrPlacement,
+      ),
+    );
+    const preRenderedBuffer = await this.preRenderAllVisibleAppearances(
+      qrRenderedBuffer,
+      documentId,
+      requestedSignersWithMode,
+    );
+
+    if (preRenderedBuffer.length > 0) {
+      const documentRoot = resolve(
+        process.cwd(),
+        process.env.DOCUMENT_UPLOAD_DIR ?? 'uploads/documents',
       );
+      const userDir = resolve(documentRoot, document.userId ?? requesterUserId);
+      mkdirSync(userDir, { recursive: true });
 
-      if (preRenderedBuffer.length > 0) {
-        // Save pre-rendered version
-        const documentRoot = resolve(
-          process.cwd(),
-          process.env.DOCUMENT_UPLOAD_DIR ?? 'uploads/documents',
-        );
-        const userDir = resolve(
-          documentRoot,
-          document.userId ?? requesterUserId,
-        );
-        mkdirSync(userDir, { recursive: true });
+      const preRenderedFileName = `${documentId}-pre-rendered.pdf`;
+      const preRenderedPath = resolve(userDir, preRenderedFileName);
+      writeFileSync(preRenderedPath, preRenderedBuffer);
 
-        const preRenderedFileName = `${documentId}-pre-rendered.pdf`;
-        const preRenderedPath = resolve(userDir, preRenderedFileName);
-        writeFileSync(preRenderedPath, preRenderedBuffer);
+      const preRenderedHash = this.sha256Hex(preRenderedBuffer);
 
-        const preRenderedHash = this.sha256Hex(preRenderedBuffer);
-
-        // Update document to use pre-rendered version
-        await this.prisma.document.update({
-          where: { id: documentId },
-          data: {
-            finalFileName: preRenderedFileName,
-            finalFileHash: preRenderedHash,
-          },
-        });
-      }
+      await this.prisma.document.update({
+        where: { id: documentId },
+        data: {
+          finalFileName: preRenderedFileName,
+          finalFileHash: preRenderedHash,
+          finalFileSize: preRenderedBuffer.length,
+          finalFileIpfsHash: null,
+          qrCodePage: qrPlacement.qrCodePage,
+          qrCodeX: qrPlacement.qrCodeX,
+          qrCodeY: qrPlacement.qrCodeY,
+          qrCodeWidth: qrPlacement.qrCodeWidth,
+          qrCodeHeight: qrPlacement.qrCodeHeight,
+        },
+      });
     }
 
     return {
@@ -1357,12 +1367,14 @@ export class CertificationService {
           displayName: user?.displayName ?? null,
           fullName: user?.identity?.fullName ?? null,
           certificateName:
-            user?.identity?.fullName ?? user?.displayName ?? user?.email ?? null,
+            user?.identity?.fullName ??
+            user?.displayName ??
+            user?.email ??
+            null,
           role: user?.role ?? null,
           signerLevel: user?.role ? (SIGNER_ROLE_RANK[user.role] ?? 999) : null,
           academicProfile: user ? this.buildSignerAcademicProfile(user) : null,
-          preferredSignatureMode:
-            user?.preferredSignatureMode.toLowerCase() ?? 'invisible',
+          preferredSignatureMode: 'visible',
           status: item.status,
           order: item.order,
           action: item.action,
@@ -1558,12 +1570,6 @@ export class CertificationService {
       );
     }
 
-    if (document.qrCodePage == null) {
-      throw new BadRequestException(
-        'Tentukan lokasi QR verifikasi terlebih dahulu sebelum dokumen ditandatangani',
-      );
-    }
-
     const requiredSignersCount = Number(document._count.requiredSigners ?? 0);
     const signerMembership =
       (document.requiredSigners[0] as SignerMembershipForSign | undefined) ??
@@ -1660,20 +1666,68 @@ export class CertificationService {
     const { p12Data, passphrase, certificateId } =
       await this.getOrCreateCertificate(userId);
 
-    const effectiveSignDto = this.resolveSignPayloadBySigner(
-      dto,
+    const signatureImagePath = this.resolveSignatureImagePath(userId);
+    if (!signatureImagePath) {
+      throw new BadRequestException(
+        'Tanda tangan visible belum tersedia. Silakan setup tanda tangan terlebih dahulu.',
+      );
+    }
+
+    let effectiveSignDto = this.resolveSignPayloadBySigner(
+      { ...dto, mode: SignatureMode.VISIBLE },
       signerMembership,
     );
 
     let sourceBufferForSigning = Buffer.from(sourcePdfBuffer);
+
+    if (document.qrCodePage == null) {
+      if (Number(document._count.signatures ?? 0) > 0) {
+        throw new BadRequestException(
+          'Dokumen ini belum memiliki QR otomatis dan sudah memiliki signature. Ulangi konfigurasi signer sebelum melanjutkan.',
+        );
+      }
+
+      const qrPlacement = await this.buildAutomaticQrPlacement(
+        sourceBufferForSigning,
+        {
+          visiblePage: effectiveSignDto.visiblePage ?? null,
+          visibleX: effectiveSignDto.visibleX ?? null,
+          visibleY: effectiveSignDto.visibleY ?? null,
+          visibleWidth: effectiveSignDto.visibleWidth ?? null,
+          visibleHeight: effectiveSignDto.visibleHeight ?? null,
+        },
+      );
+      sourceBufferForSigning = Buffer.from(
+        await this.renderVerificationQrCode(
+          sourceBufferForSigning,
+          documentId,
+          qrPlacement,
+        ),
+      );
+      effectiveSignDto = {
+        ...effectiveSignDto,
+        mode: SignatureMode.VISIBLE,
+      };
+
+      await this.prisma.document.update({
+        where: { id: documentId },
+        data: {
+          qrCodePage: qrPlacement.qrCodePage,
+          qrCodeX: qrPlacement.qrCodeX,
+          qrCodeY: qrPlacement.qrCodeY,
+          qrCodeWidth: qrPlacement.qrCodeWidth,
+          qrCodeHeight: qrPlacement.qrCodeHeight,
+        },
+      });
+    }
+
     if (
       effectiveSignDto.mode === SignatureMode.VISIBLE &&
       Number(document._count.signatures ?? 0) === 0
     ) {
-      const signatureImagePath = this.resolveSignatureImagePath(userId);
       sourceBufferForSigning = Buffer.from(
         await this.renderVisibleSignatureAppearance(
-          sourcePdfBuffer,
+          sourceBufferForSigning,
           effectiveSignDto,
           signatureImagePath,
           userId,
@@ -1920,9 +1974,7 @@ export class CertificationService {
     }
 
     if (document.qrCodePage != null) {
-      throw new BadRequestException(
-        'Dokumen sudah memiliki QR verifikasi',
-      );
+      throw new BadRequestException('Dokumen sudah memiliki QR verifikasi');
     }
 
     const sourceDocumentPath = this.resolveDocumentPath(document.userId, {
@@ -1935,13 +1987,17 @@ export class CertificationService {
     const qrWidth = dto.width ?? DEFAULT_QR_CODE_SIZE;
     const qrHeight = dto.height ?? qrWidth;
     const finalizedBuffer = Buffer.from(
-      await this.renderVerificationQrCode(readFileSync(sourceDocumentPath), document.id, {
-        qrCodePage: dto.page,
-        qrCodeX: dto.x,
-        qrCodeY: dto.y,
-        qrCodeWidth: qrWidth,
-        qrCodeHeight: qrHeight,
-      }),
+      await this.renderVerificationQrCode(
+        readFileSync(sourceDocumentPath),
+        document.id,
+        {
+          qrCodePage: dto.page,
+          qrCodeX: dto.x,
+          qrCodeY: dto.y,
+          qrCodeWidth: qrWidth,
+          qrCodeHeight: qrHeight,
+        },
+      ),
     );
     const finalizedOutput = this.saveSignedDocument(
       document.userId,
@@ -2175,6 +2231,84 @@ export class CertificationService {
     }
 
     return null;
+  }
+
+  private async buildAutomaticQrPlacement(
+    pdfBuffer: Buffer,
+    signaturePlacement: SignerPlaceholderConfig | null,
+  ): Promise<
+    Pick<
+      SignDocumentQueryResult,
+      'qrCodePage' | 'qrCodeX' | 'qrCodeY' | 'qrCodeWidth' | 'qrCodeHeight'
+    >
+  > {
+    const pdfDoc = await PDFDocument.load(pdfBuffer);
+    const pages = pdfDoc.getPages();
+
+    if (pages.length === 0) {
+      throw new BadRequestException('Dokumen PDF tidak memiliki halaman');
+    }
+
+    const pageNumber = Math.max(
+      1,
+      Math.min(signaturePlacement?.visiblePage ?? 1, pages.length),
+    );
+    const page = pages[pageNumber - 1];
+    const size = DEFAULT_QR_CODE_SIZE;
+    const margin = 24;
+    const pageWidth = page.getWidth();
+    const pageHeight = page.getHeight();
+    const signatureRect =
+      signaturePlacement?.visibleX != null &&
+      signaturePlacement.visibleY != null &&
+      signaturePlacement.visibleWidth != null &&
+      signaturePlacement.visibleHeight != null
+        ? {
+            x: signaturePlacement.visibleX,
+            y: signaturePlacement.visibleY,
+            width: signaturePlacement.visibleWidth,
+            height: signaturePlacement.visibleHeight,
+          }
+        : null;
+
+    const candidates = [
+      { x: Math.max(0, pageWidth - size - margin), y: margin },
+      { x: margin, y: margin },
+      {
+        x: Math.max(0, pageWidth - size - margin),
+        y: Math.max(0, pageHeight - size - margin),
+      },
+      { x: margin, y: Math.max(0, pageHeight - size - margin) },
+    ];
+    const selected =
+      candidates.find(
+        (candidate) =>
+          !signatureRect ||
+          !this.rectsOverlap(
+            { ...candidate, width: size, height: size },
+            signatureRect,
+          ),
+      ) ?? candidates[0];
+
+    return {
+      qrCodePage: pageNumber,
+      qrCodeX: Number(selected.x.toFixed(2)),
+      qrCodeY: Number(selected.y.toFixed(2)),
+      qrCodeWidth: size,
+      qrCodeHeight: size,
+    };
+  }
+
+  private rectsOverlap(
+    a: { x: number; y: number; width: number; height: number },
+    b: { x: number; y: number; width: number; height: number },
+  ) {
+    return (
+      a.x < b.x + b.width &&
+      a.x + a.width > b.x &&
+      a.y < b.y + b.height &&
+      a.y + a.height > b.y
+    );
   }
 
   private async renderVerificationQrCode(
@@ -2666,7 +2800,9 @@ export class CertificationService {
     const organizationName = 'DOCChain';
     const subjectDn = `CN=${commonName},O=${organizationName},C=ID`;
     const caIdentity = this.loadCertificateAuthority();
-    const issuerDn = this.formatForgeDn(caIdentity.certificate.subject.attributes);
+    const issuerDn = this.formatForgeDn(
+      caIdentity.certificate.subject.attributes,
+    );
 
     const existing = await this.prisma.certificate.findFirst({
       where: {
@@ -2815,9 +2951,7 @@ export class CertificationService {
     );
   }
 
-  private buildSignedPdfFileName(
-    originalFileName: string | null,
-  ) {
+  private buildSignedPdfFileName(originalFileName: string | null) {
     const fallbackName = 'dokumen';
     const baseName = (originalFileName ?? fallbackName)
       .replace(/\.pdf$/i, '')
@@ -2896,7 +3030,9 @@ export class CertificationService {
     return attributes
       .map((attribute) => {
         const key =
-          keyByName[attribute.name ?? ''] ?? attribute.shortName ?? attribute.name;
+          keyByName[attribute.name ?? ''] ??
+          attribute.shortName ??
+          attribute.name;
         return `${key}=${String(attribute.value).replace(/,/g, ' ')}`;
       })
       .join(',');
