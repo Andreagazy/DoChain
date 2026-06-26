@@ -96,6 +96,7 @@ export function AppTopbar({ title, subtitle, notifications }: AppTopbarProps) {
             ? adminProdiMobileItems
             : userMobileItems;
     const activeHref = getActiveHref(pathname, mobileItems);
+    const isCertificationPage = pathname === '/certification' || pathname.startsWith('/certification/');
     const profileName = user?.identity?.fullName || user?.displayName || user?.email || 'User';
     const notificationItems = notifications?.notifications ?? [];
     const actionRequiredCount = notifications?.actionRequiredCount ?? 0;
@@ -209,9 +210,11 @@ export function AppTopbar({ title, subtitle, notifications }: AppTopbarProps) {
                             <p className="max-w-40 truncate text-xs font-bold text-slate-800">
                                 {profileName}
                             </p>
-                            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                                {user?.role?.replace(/_/g, ' ') ?? 'Profil'}
-                            </p>
+                            {!isCertificationPage ? (
+                                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                                    {user?.role?.replace(/_/g, ' ') ?? 'Profil'}
+                                </p>
+                            ) : null}
                         </div>
                     </Link>
                     <Button 

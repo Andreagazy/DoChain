@@ -15,7 +15,7 @@ export enum AdminUserRole {
   JURUSAN = 'JURUSAN',
   PRODI = 'PRODI',
   ADMIN_PRODI = 'ADMIN_PRODI',
-  PEGAWAI = 'PEGAWAI',
+  DOSEN = 'DOSEN',
   MAHASISWA = 'MAHASISWA',
 }
 

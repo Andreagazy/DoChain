@@ -653,9 +653,6 @@ function CertificationPlaceholdersContent() {
                                                     <div className="min-w-0">
                                                         <p className="text-sm font-semibold text-slate-900">#{index + 1} {getSignerDisplayName(signer)}</p>
                                                         <p className="mt-1 truncate text-xs text-slate-600">{signer?.email ?? signerId}</p>
-                                                        {signer?.academicProfile ? (
-                                                            <p className="mt-1 truncate text-xs text-slate-600">{signer.academicProfile.label ?? signer.academicProfile.unitName}</p>
-                                                        ) : null}
                                                     </div>
                                                     <Badge variant="success">Visible</Badge>
                                                 </div>

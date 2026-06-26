@@ -43,7 +43,7 @@ export type UserRole =
   | 'JURUSAN'
   | 'PRODI'
   | 'ADMIN_PRODI'
-  | 'PEGAWAI'
+  | 'DOSEN'
   | 'MAHASISWA';
 
 export interface AcademicProfile {

@@ -26,7 +26,7 @@ import type { OwnedDocumentItem, SignerCandidate, User } from '@/types/auth';
 
 const SIGNER_ROLE_RANK: Record<string, number> = {
     MAHASISWA: 10,
-    PEGAWAI: 20,
+    DOSEN: 20,
     ADMIN_PRODI: 30,
     PRODI: 40,
     JURUSAN: 50,
@@ -262,7 +262,7 @@ function CertificationSignersContent() {
         }
 
         if (!canMoveSigner(index, direction)) {
-            setError('Signer hanya bisa dipindah dalam role/level yang sama.');
+            setError('Signer hanya bisa dipindah dalam kelompok urutan yang setara.');
             return;
         }
 
@@ -349,7 +349,7 @@ function CertificationSignersContent() {
                     <Badge className="rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-bold uppercase tracking-wide text-blue-700 hover:bg-white">Pilih Signer</Badge>
                     <h1 className="mt-4 text-2xl font-bold tracking-tight text-slate-950 md:text-3xl">Susun penandatangan sesuai alur akademik.</h1>
                     <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-                        Signer akan diurutkan dari level terendah ke tertinggi. Role setara tetap bisa ditukar urutannya.
+                        Signer disusun otomatis mengikuti urutan akademik. Penandatangan pada tingkat yang setara tetap bisa ditukar urutannya.
                     </p>
                 </section>
 
@@ -375,7 +375,7 @@ function CertificationSignersContent() {
                 <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
                     <CardHeader>
                         <CardTitle>Tambahkan Signer</CardTitle>
-                        <CardDescription>Signer otomatis disusun mengikuti alur kampus: mahasiswa, pegawai/dosen, admin prodi, kaprodi, lalu kajur. Urutan hanya bisa ditukar untuk role yang setara.</CardDescription>
+                        <CardDescription>Pilih penandatangan yang diperlukan. Sistem akan menyusunnya otomatis mengikuti alur akademik yang berlaku.</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
                         <Input
@@ -393,9 +393,6 @@ function CertificationSignersContent() {
                                         <div className="min-w-0">
                                             <p className="truncate text-sm font-medium text-slate-900">{getSignerDisplayName(signer)}</p>
                                             <p className="truncate text-xs text-slate-500">{signer.email}</p>
-                                            <p className="truncate text-xs text-slate-500">
-                                                {signer.academicProfile?.label ?? signer.academicProfile?.unitName ?? signer.role}
-                                            </p>
                                         </div>
                                         <Button variant="outline" className="border-slate-300" onClick={() => addSigner(signer.id)}>
                                             <Plus className="mr-2 h-4 w-4" />
@@ -412,7 +409,7 @@ function CertificationSignersContent() {
                     <CardHeader>
                         <CardTitle>Urutan Signer</CardTitle>
                         <CardDescription>
-                            Urutan antar role dikunci mengikuti alur kampus. Jika ada dua signer dengan role setara, Anda bisa memilih siapa yang tanda tangan lebih dulu.
+                            Urutan mengikuti alur kampus. Penandatangan pada tingkat yang setara dapat ditukar untuk menentukan siapa yang lebih dahulu.
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-3">
@@ -432,16 +429,8 @@ function CertificationSignersContent() {
                                             <p className="text-sm text-slate-800">
                                                 Urutan {index + 1}: <span className="font-semibold">{getSignerDisplayName(signer)}</span>
                                             </p>
-                                            {signer?.academicProfile ? (
-                                                <p className="text-xs text-slate-600">
-                                                    {signer.academicProfile.label ?? signer.academicProfile.unitName}
-                                                </p>
-                                            ) : null}
                                             <p className="text-xs text-slate-600">
                                                 Tanda tangan visible wajib digunakan. Placeholder {placeholder ? `sudah diatur di page ${placeholder.visiblePage}` : 'belum ditentukan'}.
-                                            </p>
-                                            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400">
-                                                Role: {signer?.role ?? '-'}
                                             </p>
                                         </div>
                                         <div className="flex flex-wrap gap-2">

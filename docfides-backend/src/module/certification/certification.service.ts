@@ -70,7 +70,7 @@ type SignDocumentQueryResult = {
 
 const SIGNER_ROLE_RANK: Record<string, number> = {
   MAHASISWA: 10,
-  PEGAWAI: 20,
+  DOSEN: 20,
   ADMIN_PRODI: 30,
   PRODI: 40,
   JURUSAN: 50,

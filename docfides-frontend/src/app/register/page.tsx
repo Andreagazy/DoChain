@@ -31,7 +31,7 @@ export default function RegisterPage() {
           </h1>
           <p className="mx-auto mt-3 max-w-md text-sm leading-6 text-slate-600">
             Pendaftaran mandiri sudah tidak tersedia. Akun mahasiswa, dosen,
-            pegawai, dan pejabat struktural dibuat oleh admin prodi atau
+            dosen, dan pejabat struktural dibuat oleh admin prodi atau
             superadmin.
           </p>
         </div>

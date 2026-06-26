@@ -49,7 +49,7 @@ const seededUsers = [
   {
     email: 'dosen@docchain.local',
     password: 'Dosen123!',
-    role: 'PEGAWAI',
+    role: 'DOSEN',
     displayName: 'Dosen',
   },
   {
@@ -128,6 +128,7 @@ async function main() {
       where: { email: 'pegawai@docchain.local' },
       data: {
         email: 'dosen@docchain.local',
+        role: 'DOSEN',
         displayName: 'Dosen',
       },
     });

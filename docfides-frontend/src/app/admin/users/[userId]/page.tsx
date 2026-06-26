@@ -14,7 +14,7 @@ import { getAdminUser, getUser, listAdminAcademicUnits, resetAdminUserPassword, 
 import { normalizeErrorMessage } from '@/lib/certification-flow';
 import type { AdminAcademicUnit, AdminUserItem, UpdateAdminUserPayload, UserRole } from '@/types/auth';
 
-const roles: UserRole[] = ['SUPERADMIN', 'JURUSAN', 'PRODI', 'ADMIN_PRODI', 'PEGAWAI', 'MAHASISWA'];
+const roles: UserRole[] = ['SUPERADMIN', 'JURUSAN', 'PRODI', 'ADMIN_PRODI', 'DOSEN', 'MAHASISWA'];
 const statuses: AdminUserItem['status'][] = ['ACTIVE', 'SUSPENDED', 'DISABLED'];
 const employeeTypes: NonNullable<UpdateAdminUserPayload['employeeProfile']>['employeeType'][] = ['DOSEN', 'TENAGA_KEPENDIDIKAN', 'ADMINISTRASI'];
 const structuralPositionByRole: Partial<Record<UserRole, 'KAJUR' | 'KAPRODI' | 'ADMIN_PRODI'>> = {
@@ -81,7 +81,7 @@ export default function AdminUserEditPage() {
     const structuralUnits = draft?.role === 'JURUSAN' ? jurusanUnits : prodiUnits;
     const isSuperadmin = currentUser?.role === 'SUPERADMIN';
     const isAdminProdi = currentUser?.role === 'ADMIN_PRODI';
-    const canEditTargetAsAdminProdi = isAdminProdi && draft ? draft.role === 'MAHASISWA' || draft.role === 'PEGAWAI' : false;
+    const canEditTargetAsAdminProdi = isAdminProdi && draft ? draft.role === 'MAHASISWA' || draft.role === 'DOSEN' : false;
     const canSaveUser = isSuperadmin || canEditTargetAsAdminProdi;
     const profileFieldsDisabled = saving || !canSaveUser;
 
@@ -240,7 +240,7 @@ export default function AdminUserEditPage() {
                     <Alert className="border-amber-200 bg-amber-50 text-amber-800">
                         <AlertCircle className="h-4 w-4" />
                         <AlertDescription>
-                            Admin prodi hanya dapat mengedit profil mahasiswa atau pegawai dalam prodi yang dikelola.
+                            Admin prodi hanya dapat mengedit profil mahasiswa atau dosen dalam prodi yang dikelola.
                         </AlertDescription>
                     </Alert>
                 ) : null}

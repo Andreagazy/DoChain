@@ -149,7 +149,7 @@ export default function CompleteRegistrationForm({ email }: CompleteRegistration
                     Daftar Mahasiswa
                 </CardTitle>
                 <CardDescription className="mt-1 text-slate-500">
-                    Register publik hanya untuk mahasiswa. Role pegawai, admin prodi, kaprodi, kajur, dan superadmin dibuat oleh admin sistem.
+                    Register publik hanya untuk mahasiswa. Role dosen, admin prodi, kaprodi, kajur, dan superadmin dibuat oleh admin sistem.
                 </CardDescription>
             </CardHeader>
 

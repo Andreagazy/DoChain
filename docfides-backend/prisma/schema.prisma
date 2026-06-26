@@ -21,7 +21,7 @@ enum Role {
   JURUSAN
   PRODI
   ADMIN_PRODI
-  PEGAWAI
+  DOSEN
   MAHASISWA
 }
 

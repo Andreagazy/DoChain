@@ -13,7 +13,7 @@ import { createAdminUser, getUser, listAdminAcademicUnits } from '@/lib/auth-ser
 import { normalizeErrorMessage } from '@/lib/certification-flow';
 import type { CreateAdminUserPayload, UserRole } from '@/types/auth';
 
-const roles: UserRole[] = ['SUPERADMIN', 'JURUSAN', 'PRODI', 'ADMIN_PRODI', 'PEGAWAI', 'MAHASISWA'];
+const roles: UserRole[] = ['SUPERADMIN', 'JURUSAN', 'PRODI', 'ADMIN_PRODI', 'DOSEN', 'MAHASISWA'];
 const employeeTypes: NonNullable<CreateAdminUserPayload['employeeProfile']>['employeeType'][] = ['DOSEN', 'TENAGA_KEPENDIDIKAN', 'ADMINISTRASI'];
 const structuralPositionByRole: Partial<Record<UserRole, 'KAJUR' | 'KAPRODI' | 'ADMIN_PRODI'>> = {
     JURUSAN: 'KAJUR',
@@ -104,7 +104,7 @@ export default function CreateAdminUserPage() {
         } else if (form.role !== 'SUPERADMIN') {
             const homeUnitId = form.homeUnitId || form.structuralUnitId;
             if (!homeUnitId) {
-                setError('Home unit wajib diisi untuk pegawai atau role struktural.');
+                setError('Home unit wajib diisi untuk dosen atau role struktural.');
                 return;
             }
 
@@ -243,20 +243,20 @@ export default function CreateAdminUserPage() {
                 ) : form.role !== 'SUPERADMIN' ? (
                     <Card className="border-blue-100 bg-white shadow-sm">
                         <CardHeader>
-                            <CardTitle>Profil Akademik/Pegawai</CardTitle>
-                            <CardDescription>Isi unit, identitas pegawai, dan jabatan bila user memiliki role struktural.</CardDescription>
+                            <CardTitle>Profil Akademik/Dosen</CardTitle>
+                            <CardDescription>Isi unit, identitas dosen, dan jabatan bila user memiliki role struktural.</CardDescription>
                         </CardHeader>
                         <CardContent className="grid gap-3 md:grid-cols-3">
                             <div className="space-y-1.5">
                                 <label className="text-xs font-medium text-slate-600">NIP</label>
-                                <Input value={form.nip} onChange={(event) => setForm((current) => ({ ...current, nip: onlyDigits(event.target.value).slice(0, 40) }))} placeholder="NIP pegawai" inputMode="numeric" />
+                                <Input value={form.nip} onChange={(event) => setForm((current) => ({ ...current, nip: onlyDigits(event.target.value).slice(0, 40) }))} placeholder="NIP dosen" inputMode="numeric" />
                             </div>
                             <div className="space-y-1.5">
                                 <label className="text-xs font-medium text-slate-600">NIDN</label>
                                 <Input value={form.nidn} onChange={(event) => setForm((current) => ({ ...current, nidn: onlyDigits(event.target.value).slice(0, 40) }))} placeholder="NIDN dosen" inputMode="numeric" />
                             </div>
                             <div className="space-y-1.5">
-                                <label className="text-xs font-medium text-slate-600">Tipe pegawai</label>
+                                <label className="text-xs font-medium text-slate-600">Tipe dosen</label>
                                 <select value={form.employeeType} onChange={(event) => setForm((current) => ({ ...current, employeeType: event.target.value as typeof form.employeeType }))} className="h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-sm">
                                     {employeeTypes.map((type) => <option key={type} value={type}>{type}</option>)}
                                 </select>

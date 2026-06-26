@@ -5,7 +5,7 @@ CREATE TYPE "Role" AS ENUM (
   'JURUSAN',
   'PRODI',
   'ADMIN_PRODI',
-  'PEGAWAI',
+  'DOSEN',
   'MAHASISWA'
 );
 

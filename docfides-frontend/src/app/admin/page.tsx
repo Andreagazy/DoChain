@@ -39,7 +39,7 @@ function roleColor(role: string): string {
         JURUSAN: 'bg-blue-100 text-blue-700',
         PRODI: 'bg-cyan-100 text-cyan-700',
         ADMIN_PRODI: 'bg-indigo-100 text-indigo-700',
-        PEGAWAI: 'bg-teal-100 text-teal-700',
+        DOSEN: 'bg-teal-100 text-teal-700',
         MAHASISWA: 'bg-green-100 text-green-700',
     };
     return map[role] ?? 'bg-slate-100 text-slate-600';

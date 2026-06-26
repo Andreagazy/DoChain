@@ -1133,9 +1133,9 @@ export class AdminService {
     dto: UpdateAdminUserDto,
     prodiIds: string[],
   ) {
-    if (!['MAHASISWA', 'PEGAWAI'].includes(targetRole)) {
+    if (!['MAHASISWA', 'DOSEN'].includes(targetRole)) {
       throw new BadRequestException(
-        'Admin prodi hanya dapat mengedit profil mahasiswa atau pegawai dalam prodi yang dikelola',
+        'Admin prodi hanya dapat mengedit profil mahasiswa atau dosen dalam prodi yang dikelola',
       );
     }
 
@@ -1164,7 +1164,7 @@ export class AdminService {
 
     if (targetRole === 'MAHASISWA') {
       if (dto.employeeProfile !== undefined) {
-        throw new BadRequestException('Profil mahasiswa tidak boleh diisi sebagai pegawai');
+        throw new BadRequestException('Profil mahasiswa tidak boleh diisi sebagai dosen');
       }
 
       if (dto.studentProfile === null) {
@@ -1176,13 +1176,13 @@ export class AdminService {
       }
     }
 
-    if (targetRole === 'PEGAWAI') {
+    if (targetRole === 'DOSEN') {
       if (dto.studentProfile !== undefined) {
-        throw new BadRequestException('Profil pegawai tidak boleh diisi sebagai mahasiswa');
+        throw new BadRequestException('Profil dosen tidak boleh diisi sebagai mahasiswa');
       }
 
       if (dto.employeeProfile === null) {
-        throw new BadRequestException('Admin prodi tidak dapat menghapus profil pegawai');
+        throw new BadRequestException('Admin prodi tidak dapat menghapus profil dosen');
       }
 
       if (dto.employeeProfile && !prodiIds.includes(dto.employeeProfile.homeUnitId)) {

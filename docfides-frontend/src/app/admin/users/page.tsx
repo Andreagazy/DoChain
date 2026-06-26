@@ -29,7 +29,7 @@ import {
 import { normalizeErrorMessage } from '@/lib/certification-flow';
 import type { AcademicProfileChangeRequestItem, AdminUserItem, UserRole } from '@/types/auth';
 
-const roles: UserRole[] = ['SUPERADMIN', 'JURUSAN', 'PRODI', 'ADMIN_PRODI', 'PEGAWAI', 'MAHASISWA'];
+const roles: UserRole[] = ['SUPERADMIN', 'JURUSAN', 'PRODI', 'ADMIN_PRODI', 'DOSEN', 'MAHASISWA'];
 const pageSize = 8;
 type AcademicReviewDialogState = {
     request: AcademicProfileChangeRequestItem;
@@ -155,7 +155,7 @@ export default function AdminUsersPage() {
 
     const canEditUser = (user: AdminUserItem) => (
         currentUser?.role === 'SUPERADMIN'
-        || (currentUser?.role === 'ADMIN_PRODI' && (user.role === 'MAHASISWA' || user.role === 'PEGAWAI'))
+        || (currentUser?.role === 'ADMIN_PRODI' && (user.role === 'MAHASISWA' || user.role === 'DOSEN'))
     );
 
     const getProfileLabel = (user: AdminUserItem) => {
@@ -182,7 +182,7 @@ export default function AdminUsersPage() {
     return (
         <AppShell
             title="Kelola User"
-            subtitle={currentUser?.role === 'ADMIN_PRODI' ? 'Pantau mahasiswa dan pegawai dalam prodi yang Anda kelola.' : 'Kelola akun dari tabel, lalu buka halaman edit untuk perubahan detail.'}
+            subtitle={currentUser?.role === 'ADMIN_PRODI' ? 'Pantau mahasiswa dan dosen dalam prodi yang Anda kelola.' : 'Kelola akun dari tabel, lalu buka halaman edit untuk perubahan detail.'}
         >
             <div className="space-y-5">
                 {error ? (

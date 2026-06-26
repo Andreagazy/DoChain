@@ -990,7 +990,6 @@ export class PublicService {
       SUPERADMIN: 'Administrator',
       JURUSAN: 'Jurusan',
       PRODI: 'Program Studi',
-      PEGAWAI: 'Pegawai',
       MAHASISWA: 'Mahasiswa',
       DOSEN: 'Dosen',
       TENAGA_KEPENDIDIKAN: 'Tenaga Kependidikan',
