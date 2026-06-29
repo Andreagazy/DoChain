@@ -5,6 +5,7 @@ import { PrismaModule } from '../prisma/prisma.module';
 import { BlockchainModule } from '../blockchain/blockchain.module';
 import { PublicController } from './public.controller';
 import { PublicService } from './public.service';
+import { VerifyPdfSignatureValidationService } from './verify-pdf-signature-validation.service';
 
 @Module({
   imports: [
@@ -13,6 +14,6 @@ import { PublicService } from './public.service';
     MulterModule.register({ storage: memoryStorage() }),
   ],
   controllers: [PublicController],
-  providers: [PublicService],
+  providers: [PublicService, VerifyPdfSignatureValidationService],
 })
 export class PublicModule {}

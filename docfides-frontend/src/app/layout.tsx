@@ -10,6 +10,16 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "DOCChain - Blockchain Document Certification",
   description: "Secure, decentralized, and seamless digital document certification powered by blockchain.",
+  icons: {
+    icon: [
+      {
+        url: "/image/docchain-logo.png",
+        type: "image/png",
+      },
+    ],
+    shortcut: "/image/docchain-logo.png",
+    apple: "/image/docchain-logo.png",
+  },
 };
 
 export default function RootLayout({

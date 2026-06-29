@@ -30,6 +30,7 @@ type PendingIdentity = {
 type AdminProdiStats = {
   totalDocuments: number;
   pendingDocuments: number;
+  assignedPendingDocuments: number;
   fullySignedDocuments: number;
   partialDocuments: number;
   revokedDocuments: number;
@@ -139,6 +140,7 @@ export default function AdminProdiDashboardPage() {
 
         let totalDocuments = 0;
         let pendingDocuments = 0;
+        let assignedPendingDocuments = 0;
         let fullySignedDocuments = 0;
         let partialDocuments = 0;
         let revokedDocuments = 0;
@@ -162,6 +164,22 @@ export default function AdminProdiDashboardPage() {
           fullySignedDocuments = statusMap['FULLY_SIGNED'] ?? 0;
           partialDocuments = statusMap['PARTIALLY_SIGNED'] ?? 0;
           revokedDocuments = statusMap['REVOKED'] ?? 0;
+        }
+
+        try {
+          const assignedRes = await api.get('/certification/documents/assigned');
+          const assignments = (assignedRes.data as {
+            assignments: Array<{
+              signerStatus: string;
+              document: { status: string };
+            }>;
+          }).assignments ?? [];
+          assignedPendingDocuments = assignments.filter((assignment) => (
+            assignment.signerStatus === 'PENDING'
+            && !['FULLY_SIGNED', 'REVOKED', 'DECLINED', 'REJECTED'].includes(assignment.document.status)
+          )).length;
+        } catch {
+          assignedPendingDocuments = 0;
         }
 
         let pendingIdentities = 0;
@@ -190,6 +208,7 @@ export default function AdminProdiDashboardPage() {
         setStats({
           totalDocuments,
           pendingDocuments,
+          assignedPendingDocuments,
           fullySignedDocuments,
           partialDocuments,
           revokedDocuments,
@@ -202,7 +221,7 @@ export default function AdminProdiDashboardPage() {
         // silently fail — show zeros
         setStats({
           totalDocuments: 0, pendingDocuments: 0, fullySignedDocuments: 0,
-          partialDocuments: 0, revokedDocuments: 0, pendingIdentities: 0,
+          assignedPendingDocuments: 0, partialDocuments: 0, revokedDocuments: 0, pendingIdentities: 0,
           totalUsers: 0, docByStatus: [], recentPendingIdentities: [],
         });
       } finally {
@@ -278,12 +297,12 @@ export default function AdminProdiDashboardPage() {
             text="text-blue-700"
           />
           <StatCard
-            label="Perlu Tanda Tangan"
-            value={stats?.pendingDocuments ?? 0}
-            sublabel="Menunggu penyelesaian"
+            label="Tugas Tanda Tangan"
+            value={stats?.assignedPendingDocuments ?? 0}
+            sublabel="Khusus akun Anda"
             icon={FileClock}
-            bg={stats?.pendingDocuments ? 'bg-amber-50 text-amber-600' : 'bg-slate-50 text-slate-500'}
-            text={stats?.pendingDocuments ? 'text-amber-600' : 'text-slate-600'}
+            bg={stats?.assignedPendingDocuments ? 'bg-amber-50 text-amber-600' : 'bg-slate-50 text-slate-500'}
+            text={stats?.assignedPendingDocuments ? 'text-amber-600' : 'text-slate-600'}
           />
           <StatCard
             label="Selesai Sertifikasi"
@@ -341,19 +360,20 @@ export default function AdminProdiDashboardPage() {
                 badge={stats?.pendingIdentities}
               />
               <QuickAction
-                href="/admin/documents"
+                href="/certification/assigned"
                 icon={FileClock}
                 iconBg="bg-blue-50 text-blue-600"
-                label="Dokumen Menunggu"
-                desc="Pantau dokumen yang belum selesai ditandatangani"
-                badge={stats?.pendingDocuments}
+                label="Perlu Saya Tandatangani"
+                desc="Dokumen yang menunggu tanda tangan dari akun Anda"
+                badge={stats?.assignedPendingDocuments}
               />
               <QuickAction
                 href="/admin/documents"
                 icon={FileSignature}
                 iconBg="bg-emerald-50 text-emerald-600"
                 label="Monitoring Sertifikasi"
-                desc="Lihat semua dokumen dan status penandatanganannya"
+                desc="Pantau dokumen prodi yang masih berjalan atau sudah selesai"
+                badge={stats?.pendingDocuments}
               />
               <QuickAction
                 href="/admin/users"
@@ -445,7 +465,7 @@ export default function AdminProdiDashboardPage() {
               <div className="grid grid-cols-2 gap-2">
                 {[
                   { label: 'Selesai', value: stats?.fullySignedDocuments ?? 0, icon: CheckCircle2, color: 'text-emerald-600 bg-emerald-50' },
-                  { label: 'Pending', value: stats?.pendingDocuments ?? 0, icon: Clock, color: 'text-amber-600 bg-amber-50' },
+                  { label: 'Tugas Saya', value: stats?.assignedPendingDocuments ?? 0, icon: Clock, color: 'text-amber-600 bg-amber-50' },
                   { label: 'Dibatalkan', value: stats?.revokedDocuments ?? 0, icon: FileX2, color: 'text-red-600 bg-red-50' },
                   { label: 'ID Pending', value: stats?.pendingIdentities ?? 0, icon: XCircle, color: 'text-red-600 bg-red-50' },
                 ].map(({ label, value, icon: Icon, color }) => (

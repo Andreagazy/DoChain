@@ -12,7 +12,7 @@ import { AppShell } from '@/components/layout/app-shell';
 import { UploadDropzone } from '@/components/documents/upload-dropzone';
 import { CertificationStepper } from '@/components/certification/certification-stepper';
 import { getIdentityStatus, listMyCertificationDocuments, uploadDocumentForCertification } from '@/lib/auth-service';
-import { buildCertificationStepHref, normalizeErrorMessage } from '@/lib/certification-flow';
+import { buildCertificationStepHref, normalizeErrorMessage, setActiveCertificationDocumentId } from '@/lib/certification-flow';
 import type { OwnedDocumentItem } from '@/types/auth';
 
 const isDraftDocument = (document: OwnedDocumentItem) => {
@@ -98,6 +98,7 @@ export default function CertificationUploadPage() {
         setUploading(true);
         try {
             const uploaded = await uploadDocumentForCertification(file);
+            setActiveCertificationDocumentId(uploaded.id);
             router.push(buildCertificationStepHref('signers', uploaded.id));
         } catch (err) {
             setError(normalizeErrorMessage(err));
@@ -112,6 +113,7 @@ export default function CertificationUploadPage() {
             return;
         }
 
+        setActiveCertificationDocumentId(selectedDocumentId);
         router.push(buildCertificationStepHref('signers', selectedDocumentId));
     };
 

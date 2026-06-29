@@ -15,7 +15,7 @@ import {
     getCertificationDocumentFile,
     getCertificationEligibility,
 } from '@/lib/auth-service';
-import { buildCertificationStepHref, getDocumentNextCertificationStep } from '@/lib/certification-flow';
+import { buildCertificationStepHref, getDocumentNextCertificationStep, setActiveCertificationDocumentId } from '@/lib/certification-flow';
 import type { CertificationDocumentDetailResponse, CertificationEligibilityResponse } from '@/types/auth';
 
 function normalizeErrorMessage(err: unknown): string {
@@ -232,7 +232,11 @@ export default function DocumentDetailPage() {
                                     <Button
                                         className="mt-3 w-full"
                                         disabled={!nextStep || detail.document.status === 'REVOKED'}
-                                        onClick={() => nextStep && router.push(buildCertificationStepHref(nextStep, eligibility.document.id))}
+                                        onClick={() => {
+                                            if (!nextStep) return;
+                                            setActiveCertificationDocumentId(eligibility.document.id);
+                                            router.push(buildCertificationStepHref(nextStep, eligibility.document.id));
+                                        }}
                                     >
                                         {nextStep === 'signers' ? <Users className="h-4 w-4" /> : null}
                                         {nextActionLabel}
@@ -341,7 +345,10 @@ export default function DocumentDetailPage() {
                                             Tambahkan signer terlebih dahulu agar proses tanda tangan bisa dipantau.
                                         </p>
                                         <Button asChild className="mt-4 rounded-xl bg-blue-600 font-semibold text-white hover:bg-blue-700">
-                                            <Link href={buildCertificationStepHref('signers', detail.document.id)}>
+                                            <Link
+                                                href={buildCertificationStepHref('signers', detail.document.id)}
+                                                onClick={() => setActiveCertificationDocumentId(detail.document.id)}
+                                            >
                                                 <UserCheck className="mr-2 h-4 w-4" />
                                                 Tambah Signer
                                             </Link>

@@ -143,6 +143,33 @@ function HashValue({ value }: { value: string | null | undefined }) {
     return <span className="break-all font-mono text-xs text-slate-700">{value}</span>;
 }
 
+function isDocchainSignature(sig: SignatureDetail) {
+    const values = [
+        sig.signerName,
+        sig.signerDN,
+        sig.reason,
+        sig.location,
+        sig.contactInfo,
+        ...sig.certificateChain.flatMap((certificate) => [
+            ...Object.values(certificate.subject),
+            ...Object.values(certificate.issuer),
+        ]),
+    ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+    return values.includes('docchain') || values.includes('dochain');
+}
+
+function shouldShowSignatureDetails(result: InspectResult) {
+    return (
+        result.verification.registeredOnBlockchain ||
+        result.dbMatch.found ||
+        result.signatures.some((signature) => isDocchainSignature(signature))
+    );
+}
+
 /* ─── Sub-components ─────────────────────────────────────────────── */
 
 function DropZone({
@@ -555,9 +582,9 @@ function DbMatchCard({ match }: { match: DbMatchResult }) {
             <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                 <Database className="h-5 w-5 shrink-0 text-slate-400" />
                 <div>
-                    <p className="text-sm font-semibold text-slate-700">Tidak ditemukan di database DOCChain</p>
+                    <p className="text-sm font-semibold text-slate-700">Bukan dokumen resmi DOCChain</p>
                     <p className="text-xs text-slate-500">
-                        Dokumen ini tidak terdaftar dalam sistem — mungkin ditandatangani oleh sistem lain.
+                        File ini tidak memiliki catatan dokumen final di database DOCChain.
                     </p>
                 </div>
             </div>
@@ -607,8 +634,10 @@ function BlockchainCard({ record, fileHash }: { record: BlockchainRecord | null;
             <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                 <Database className="h-5 w-5 shrink-0 text-slate-400" />
                 <div>
-                    <p className="text-sm font-semibold text-slate-700">Tidak ditemukan di blockchain</p>
-                    <p className="text-xs text-slate-500">Hash file ini belum tercatat pada DocumentHashRegistry Besu.</p>
+                    <p className="text-sm font-semibold text-slate-700">Hash tidak tercatat di blockchain DOCChain</p>
+                    <p className="text-xs text-slate-500">
+                        File ini tidak cocok dengan hash dokumen final resmi yang tercatat pada DOCChain.
+                    </p>
                 </div>
             </div>
         );
@@ -708,6 +737,22 @@ function TechnicalDetailsCard({
                     </p>
                 </div>
             )}
+        </div>
+    );
+}
+
+function ExternalDocumentNotice({ signatureCount }: { signatureCount: number }) {
+    return (
+        <div className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+            <div className="flex items-start gap-3">
+                <Info className="mt-0.5 h-5 w-5 shrink-0 text-slate-500" />
+                <div>
+                    <p className="text-sm font-bold text-slate-900">Dokumen tidak berasal dari DOCChain</p>
+                    <p className="mt-1 text-sm leading-6 text-slate-600">
+                        Sistem menemukan {signatureCount} tanda tangan digital pada file ini, tetapi file tidak memiliki catatan hash resmi di DOCChain. Detail tanda tangan tidak ditampilkan karena verifikasi DOCChain berfokus pada kecocokan hash dokumen final yang tercatat di blockchain.
+                    </p>
+                </div>
+            </div>
         </div>
     );
 }
@@ -844,14 +889,24 @@ export default function VerifyDocumentPage() {
                 {/* Results */}
                 {result && (
                     <>
+                        {(() => {
+                            const showSignatureDetails = shouldShowSignatureDetails(result);
+                            const showExternalNotice = result.signatures.length > 0 && !showSignatureDetails;
+
+                            return (
+                                <>
                         {/* Overall status */}
                         <OverallStatusBanner result={result} />
 
-                        {/* DB match */}
-                        <DbMatchCard match={result.dbMatch} />
+                        {(result.dbMatch.found || result.verification.registeredOnBlockchain || showSignatureDetails) && (
+                            <>
+                                {/* DB match */}
+                                <DbMatchCard match={result.dbMatch} />
 
-                        {/* Blockchain match */}
-                        <BlockchainCard record={result.blockchain} fileHash={result.fileHash} />
+                                {/* Blockchain match */}
+                                <BlockchainCard record={result.blockchain} fileHash={result.fileHash} />
+                            </>
+                        )}
 
                         {/* File metadata */}
                         <FileMetaCard result={result} fileName={fileName} />
@@ -859,8 +914,12 @@ export default function VerifyDocumentPage() {
                         {/* Technical details */}
                         <TechnicalDetailsCard result={result} />
 
+                        {showExternalNotice && (
+                            <ExternalDocumentNotice signatureCount={result.signatures.length} />
+                        )}
+
                         {/* Signature panels */}
-                        {result.signatures.length > 0 && (
+                        {showSignatureDetails && result.signatures.length > 0 && (
                             <div className="space-y-4">
                                 <h2 className="flex items-center gap-2 text-sm font-bold text-slate-700">
                                     <Fingerprint className="h-4 w-4 text-blue-700" />
@@ -871,6 +930,9 @@ export default function VerifyDocumentPage() {
                                 ))}
                             </div>
                         )}
+                                </>
+                            );
+                        })()}
 
                         {/* Reset button */}
                         <div className="text-center">

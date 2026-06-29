@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { CheckCircle2, Clock3, Eye, FileText, Inbox, Loader2, PenLine, ShieldCheck, XCircle } from 'lucide-react';
 import {
@@ -26,7 +26,7 @@ import {
     listAssignedCertificationDocuments,
     signDocumentCertification,
 } from '@/lib/auth-service';
-import { normalizeErrorMessage } from '@/lib/certification-flow';
+import { loadPdfJsModule, normalizeErrorMessage, type PdfDocumentProxy } from '@/lib/certification-flow';
 import type { AssignedDocumentItem } from '@/types/auth';
 
 type DocumentPreviewState = {
@@ -92,10 +92,14 @@ export default function CertificationAssignedDocumentsPage() {
     const [previewState, setPreviewState] = useState<DocumentPreviewState | null>(null);
     const [previewLoading, setPreviewLoading] = useState(false);
     const [previewError, setPreviewError] = useState('');
+    const [previewPdfDocument, setPreviewPdfDocument] = useState<PdfDocumentProxy | null>(null);
+    const [previewPage, setPreviewPage] = useState(1);
+    const [previewPageCount, setPreviewPageCount] = useState(0);
     const [currentPage, setCurrentPage] = useState(1);
     const [declineDialog, setDeclineDialog] = useState<DeclineDialogState>(null);
     const [signDialog, setSignDialog] = useState<SignDialogState>(null);
     const [declineReason, setDeclineReason] = useState('');
+    const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
     const pendingAssignments = useMemo(
         () => assignments.filter(isAssignmentActionable),
@@ -182,8 +186,19 @@ export default function CertificationAssignedDocumentsPage() {
                 const blob = await getCertificationDocumentOriginalFile(previewState.documentId);
                 objectUrl = URL.createObjectURL(blob);
                 setPreviewState((current) => current ? { ...current, url: objectUrl } : current);
+                const pdfjs = await loadPdfJsModule();
+                const pdfData = new Uint8Array(await blob.arrayBuffer());
+                const loadingTask = pdfjs.getDocument({
+                    data: pdfData,
+                });
+                const pdfDocument = await loadingTask.promise;
+                setPreviewPdfDocument(pdfDocument);
+                setPreviewPageCount(pdfDocument.numPages);
+                setPreviewPage(1);
             } catch (err) {
                 setPreviewError(normalizeErrorMessage(err));
+                setPreviewPdfDocument(null);
+                setPreviewPageCount(0);
             } finally {
                 setPreviewLoading(false);
             }
@@ -199,6 +214,50 @@ export default function CertificationAssignedDocumentsPage() {
     }, [previewState?.documentId]);
 
     useEffect(() => {
+        let cancelled = false;
+
+        async function renderPreviewPage() {
+            if (!previewPdfDocument) {
+                return;
+            }
+
+            try {
+                const page = await previewPdfDocument.getPage(previewPage);
+                if (cancelled) return;
+
+                const viewport = page.getViewport({ scale: 1.35 });
+                const canvas = previewCanvasRef.current;
+                const context = canvas?.getContext('2d');
+
+                if (!canvas || !context) {
+                    return;
+                }
+
+                canvas.width = Math.floor(viewport.width);
+                canvas.height = Math.floor(viewport.height);
+                canvas.style.width = `${viewport.width}px`;
+                canvas.style.height = `${viewport.height}px`;
+
+                await page.render({
+                    canvasContext: context,
+                    canvas,
+                    viewport,
+                }).promise;
+            } catch (err) {
+                if (!cancelled) {
+                    setPreviewError(normalizeErrorMessage(err));
+                }
+            }
+        }
+
+        void renderPreviewPage();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [previewPdfDocument, previewPage]);
+
+    useEffect(() => {
         setCurrentPage((page) => Math.min(page, totalPages));
     }, [totalPages]);
 
@@ -209,6 +268,10 @@ export default function CertificationAssignedDocumentsPage() {
             }
             return null;
         });
+        setPreviewPdfDocument(null);
+        setPreviewPage(1);
+        setPreviewPageCount(0);
+        setPreviewError('');
     };
 
     const openPreview = (assignment: AssignedDocumentItem) => {
@@ -503,10 +566,10 @@ export default function CertificationAssignedDocumentsPage() {
             </div>
 
             <Dialog open={Boolean(previewState)} onOpenChange={(open) => !open && closePreview()}>
-                <DialogContent className="max-w-5xl">
+                <DialogContent className="w-[min(96vw,1180px)] max-w-none">
                     <DialogHeader>
                         <DialogTitle>{previewState?.title ?? 'Preview Dokumen'}</DialogTitle>
-                        <DialogDescription>Preview file original untuk dokumen yang harus Anda tandatangani.</DialogDescription>
+                        <DialogDescription>Preview file original sesuai ukuran halaman dokumen.</DialogDescription>
                     </DialogHeader>
 
                     {previewLoading ? (
@@ -518,12 +581,39 @@ export default function CertificationAssignedDocumentsPage() {
                         <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
                             Gagal memuat preview: {previewError}
                         </div>
-                    ) : previewState?.url ? (
-                        <iframe
-                            title={previewState.title}
-                            src={previewState.url}
-                            className="h-[75vh] w-full rounded-2xl border border-slate-200 bg-white"
-                        />
+                    ) : previewPdfDocument ? (
+                        <div className="space-y-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                                <p className="text-sm font-semibold text-slate-700">
+                                    Halaman {previewPage} dari {previewPageCount}
+                                </p>
+                                <div className="flex items-center gap-2">
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="h-8 border-slate-300 px-3 text-xs"
+                                        onClick={() => setPreviewPage((page) => Math.max(1, page - 1))}
+                                        disabled={previewPage <= 1}
+                                    >
+                                        Sebelumnya
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant="outline"
+                                        className="h-8 border-slate-300 px-3 text-xs"
+                                        onClick={() => setPreviewPage((page) => Math.min(previewPageCount, page + 1))}
+                                        disabled={previewPage >= previewPageCount}
+                                    >
+                                        Berikutnya
+                                    </Button>
+                                </div>
+                            </div>
+                            <div className="max-h-[72vh] overflow-auto rounded-2xl border border-slate-200 bg-slate-100 p-4">
+                                <div className="mx-auto w-fit">
+                                    <canvas ref={previewCanvasRef} className="block rounded-md bg-white shadow-sm" />
+                                </div>
+                            </div>
+                        </div>
                     ) : (
                         <div className="flex min-h-80 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-sm text-slate-500">
                             Tidak ada preview yang tersedia.

@@ -8,6 +8,7 @@ import {
   BlockchainDocumentRecord,
   BlockchainService,
 } from '../blockchain/blockchain.service';
+import { VerifyPdfSignatureValidationService } from './verify-pdf-signature-validation.service';
 
 /* ─── Response Types ────────────────────────────────────────────────── */
 
@@ -89,6 +90,7 @@ export class PublicService {
   constructor(
     private prisma: PrismaService,
     private blockchainService: BlockchainService,
+    private verifyPdfSignatureValidationService: VerifyPdfSignatureValidationService,
   ) {}
 
   /* ════════════════════════════════════════════════════════════════════
@@ -311,8 +313,13 @@ export class PublicService {
     const dbMatch = await this.crossCheckDatabase(fileHash);
     const blockchain = await this.blockchainService.getRecordByHash(fileHash);
 
-    // Extract and parse PDF signatures
-    const signatures = await this.extractPdfSignatures(fileBuffer);
+    const internalSignatures = await this.extractPdfSignatures(fileBuffer);
+    const verifyPdfSignatures =
+      await this.verifyPdfSignatureValidationService.validate(fileBuffer);
+    const signatures = this.mergeSignatureValidationDetails(
+      internalSignatures,
+      verifyPdfSignatures,
+    );
 
     const registeredOnBlockchain = Boolean(blockchain?.exists);
     const revokedOnBlockchain = Boolean(blockchain?.revoked);
@@ -321,14 +328,36 @@ export class PublicService {
       blockchain?.documentHash?.toLowerCase().replace(/^0x/, '') ===
         fileHash.toLowerCase();
 
-    // Determine overall status from blockchain proof first, then PDF signatures.
+    const hasModifiedSignature = signatures.some(
+      (signature) => signature.integrityStatus === 'MODIFIED',
+    );
+    const hasDocchainSignature = signatures.some((signature) =>
+      this.isDocchainSignature(signature),
+    );
+    const hasProblematicDocchainSignature = signatures.some(
+      (signature) =>
+        this.isDocchainSignature(signature) &&
+        signature.integrityStatus !== 'INTACT',
+    );
+
+    // Determine overall status from PDF integrity first, then blockchain proof.
     let overallStatus: InspectDocumentResult['overallStatus'];
     let overallMessage: string;
 
-    if (!registeredOnBlockchain) {
+    if (registeredOnBlockchain && hasModifiedSignature) {
+      overallStatus = 'MODIFIED';
+      overallMessage =
+        'Tanda tangan PDF menunjukkan dokumen telah dimodifikasi setelah ditandatangani.';
+    } else if (!registeredOnBlockchain && hasProblematicDocchainSignature) {
+      overallStatus = 'MODIFIED';
+      overallMessage =
+        'Dokumen memiliki tanda tangan DOCChain, tetapi tanda tangan tidak dapat divalidasi dan hash file tidak ditemukan di blockchain. Dokumen terindikasi telah berubah dari dokumen final resmi DOCChain.';
+    } else if (!registeredOnBlockchain) {
       overallStatus = 'NOT_RECORDED';
       overallMessage =
-        'Hash file ini tidak ditemukan di blockchain DOCChain. Dokumen belum dapat dinyatakan sebagai dokumen final resmi DOCChain.';
+        hasModifiedSignature && !hasDocchainSignature
+          ? 'File ini memiliki tanda tangan digital yang bermasalah, tetapi bukan tanda tangan DOCChain dan hash file tidak ditemukan di blockchain DOCChain. Dokumen tidak dapat dinyatakan sebagai dokumen final resmi DOCChain.'
+          : 'Hash file ini tidak ditemukan di blockchain DOCChain. Dokumen belum dapat dinyatakan sebagai dokumen final resmi DOCChain.';
     } else if (revokedOnBlockchain) {
       overallStatus = 'REVOKED';
       overallMessage =
@@ -340,10 +369,6 @@ export class PublicService {
     } else if (signatures.every((s) => s.integrityStatus === 'INTACT')) {
       overallStatus = 'VALID';
       overallMessage = `Hash file cocok dengan blockchain dan semua ${signatures.length} tanda tangan digital masih utuh.`;
-    } else if (signatures.some((s) => s.integrityStatus === 'MODIFIED')) {
-      overallStatus = 'MODIFIED';
-      overallMessage =
-        'Hash file tercatat, tetapi tanda tangan PDF menunjukkan dokumen telah dimodifikasi setelah ditandatangani.';
     } else {
       overallStatus = 'PARTIAL';
       overallMessage =
@@ -413,6 +438,73 @@ export class PublicService {
     }
 
     return results;
+  }
+
+  private isDocchainSignature(signature: SignatureDetail) {
+    const values = [
+      signature.signerName,
+      signature.signerDN,
+      signature.reason,
+      signature.location,
+      signature.contactInfo,
+      ...signature.certificateChain.flatMap((certificate) => [
+        ...Object.values(certificate.subject),
+        ...Object.values(certificate.issuer),
+      ]),
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+
+    return values.includes('docchain') || values.includes('dochain');
+  }
+
+  private mergeSignatureValidationDetails(
+    internalSignatures: SignatureDetail[],
+    verifyPdfSignatures: SignatureDetail[] | null,
+  ) {
+    if (!verifyPdfSignatures?.length) {
+      return internalSignatures;
+    }
+
+    if (!internalSignatures.length) {
+      return verifyPdfSignatures;
+    }
+
+    const count = Math.max(internalSignatures.length, verifyPdfSignatures.length);
+    const merged: SignatureDetail[] = [];
+
+    for (let index = 0; index < count; index++) {
+      const internal = internalSignatures[index];
+      const verified = verifyPdfSignatures[index];
+
+      if (!internal) {
+        merged.push(verified);
+        continue;
+      }
+
+      if (!verified) {
+        merged.push(internal);
+        continue;
+      }
+
+      const shouldUseVerifiedIntegrity =
+        verified.integrityStatus === 'MODIFIED' ||
+        (internal.integrityStatus === 'CANNOT_VERIFY' &&
+          verified.integrityStatus === 'INTACT');
+
+      merged.push({
+        ...internal,
+        integrityStatus: shouldUseVerifiedIntegrity
+          ? verified.integrityStatus
+          : internal.integrityStatus,
+        integrityMessage: shouldUseVerifiedIntegrity
+          ? verified.integrityMessage
+          : internal.integrityMessage,
+      });
+    }
+
+    return merged;
   }
 
   private extractPdfSignatureEntries(pdfBuffer: Buffer) {
@@ -649,10 +741,11 @@ export class PublicService {
           integrityMessage = 'Dokumen telah dimodifikasi setelah ditandatangani!';
         }
       } else {
-        // Can't compare digest precisely, mark as cannot verify but note byte range is present
-        integrityStatus = 'INTACT';
+        // ByteRange alone only proves there is a signature container, not that the
+        // cryptographic digest still matches the current PDF bytes.
+        integrityStatus = 'CANNOT_VERIFY';
         integrityMessage =
-          'Byte range tanda tangan ditemukan. Integritas dasar dokumen terpenuhi.';
+          'Byte range tanda tangan ditemukan, tetapi digest tanda tangan tidak dapat dibandingkan. Integritas dokumen tidak dapat dipastikan.';
       }
     } catch {}
 

@@ -21,7 +21,14 @@ import {
     requestDocumentSigners,
     startDocumentCertification,
 } from '@/lib/auth-service';
-import { buildCertificationStepHref, getDefaultPlaceholder, normalizeErrorMessage, type PlaceholderConfig } from '@/lib/certification-flow';
+import {
+    buildCertificationStepHref,
+    getActiveCertificationDocumentId,
+    getDefaultPlaceholder,
+    normalizeErrorMessage,
+    setActiveCertificationDocumentId,
+    type PlaceholderConfig,
+} from '@/lib/certification-flow';
 import type { OwnedDocumentItem, SignerCandidate, User } from '@/types/auth';
 
 const SIGNER_ROLE_RANK: Record<string, number> = {
@@ -175,17 +182,29 @@ function CertificationSignersContent() {
                 setMyDocuments(documents.documents);
                 setSignerCandidates(candidates.signers);
 
+                const documentIdFromQuery = searchParams.get('documentId')?.trim() ?? '';
+                const documentIdFromSession = getActiveCertificationDocumentId();
+
                 setSelectedDocumentId((current) => {
-                    const documentIdFromQuery = searchParams.get('documentId')?.trim();
-                    if (documentIdFromQuery && documents.documents.some((document) => document.id === documentIdFromQuery)) {
-                        return documentIdFromQuery;
+                    const candidates = [
+                        documentIdFromQuery,
+                        documentIdFromSession,
+                        current,
+                        documents.documents[0]?.id ?? '',
+                    ];
+                    const selectedId = candidates.find((candidate) =>
+                        candidate && documents.documents.some((document) => document.id === candidate)
+                    ) ?? '';
+
+                    if (selectedId) {
+                        setActiveCertificationDocumentId(selectedId);
                     }
 
-                    if (current && documents.documents.some((document) => document.id === current)) {
-                        return current;
+                    if (documentIdFromQuery) {
+                        router.replace(buildCertificationStepHref('signers'), { scroll: false });
                     }
 
-                    return documents.documents[0]?.id ?? '';
+                    return selectedId;
                 });
             } catch (err) {
                 setError(normalizeErrorMessage(err));
@@ -309,6 +328,7 @@ function CertificationSignersContent() {
                 placeholders,
             });
 
+            setActiveCertificationDocumentId(selectedDocumentId);
             router.push(buildCertificationStepHref('placeholders', selectedDocumentId));
         });
     };

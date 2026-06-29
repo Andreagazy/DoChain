@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { OwnedDocumentItem } from '@/types/auth';
 import { StatusBadge } from '@/components/documents/status-badge';
-import { buildCertificationStepHref, getDocumentNextCertificationStep } from '@/lib/certification-flow';
+import { buildCertificationStepHref, getDocumentNextCertificationStep, setActiveCertificationDocumentId } from '@/lib/certification-flow';
 
 interface DocumentTableProps {
     documents: OwnedDocumentItem[];
@@ -113,7 +113,14 @@ export function DocumentTable({
                                                     <Download className="h-3.5 w-3.5" /> Final IPFS
                                                 </Button>
                                             ) : null}
-                                            <Link href={getActionHref(doc)}>
+                                            <Link
+                                                href={getActionHref(doc)}
+                                                onClick={() => {
+                                                    if (doc.accessType !== 'SIGNER') {
+                                                        setActiveCertificationDocumentId(doc.id);
+                                                    }
+                                                }}
+                                            >
                                                 <Button size="sm" className="h-8 rounded-lg bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-bold shadow-md shadow-indigo-600/10 hover:shadow-indigo-600/20 transition-all">
                                                     {doc.accessType === 'SIGNER' ? 'Sign' : 'Lanjut'} <ArrowRight className="h-3.5 w-3.5 ml-0.5 group-hover:translate-x-0.5 transition-transform" />
                                                 </Button>

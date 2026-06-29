@@ -28,8 +28,10 @@ import {
 } from '@/lib/auth-service';
 import {
     buildCertificationStepHref,
+    getActiveCertificationDocumentId,
     loadPdfJsModule,
     normalizeErrorMessage,
+    setActiveCertificationDocumentId,
     type PdfDocumentProxy,
     type PlaceholderConfig,
 } from '@/lib/certification-flow';
@@ -133,17 +135,29 @@ function CertificationReviewContent() {
                 setHasSignature(signatureStatus.hasSignature);
                 setMyDocuments(documents.documents);
 
+                const documentIdFromQuery = searchParams.get('documentId')?.trim() ?? '';
+                const documentIdFromSession = getActiveCertificationDocumentId();
+
                 setSelectedDocumentId((current) => {
-                    const documentIdFromQuery = searchParams.get('documentId')?.trim();
-                    if (documentIdFromQuery && documents.documents.some((document) => document.id === documentIdFromQuery)) {
-                        return documentIdFromQuery;
+                    const candidates = [
+                        documentIdFromQuery,
+                        documentIdFromSession,
+                        current,
+                        documents.documents[0]?.id ?? '',
+                    ];
+                    const selectedId = candidates.find((candidate) =>
+                        candidate && documents.documents.some((document) => document.id === candidate)
+                    ) ?? '';
+
+                    if (selectedId) {
+                        setActiveCertificationDocumentId(selectedId);
                     }
 
-                    if (current && documents.documents.some((document) => document.id === current)) {
-                        return current;
+                    if (documentIdFromQuery) {
+                        router.replace(buildCertificationStepHref('review'), { scroll: false });
                     }
 
-                    return documents.documents[0]?.id ?? '';
+                    return selectedId;
                 });
             } catch (err) {
                 setError(normalizeErrorMessage(err));
@@ -562,7 +576,10 @@ function CertificationReviewContent() {
                         </div>
 
                         <div className="flex flex-wrap gap-2">
-                            <Button variant="outline" className="border-slate-300" onClick={() => router.push(buildCertificationStepHref('placeholders', selectedDocumentId))}>
+                            <Button variant="outline" className="border-slate-300" onClick={() => {
+                                setActiveCertificationDocumentId(selectedDocumentId);
+                                router.push(buildCertificationStepHref('placeholders', selectedDocumentId));
+                            }}>
                                 <ArrowLeft className="mr-2 h-4 w-4" />
                                 Kembali ke Placeholder
                             </Button>
@@ -723,7 +740,10 @@ function CertificationReviewContent() {
                                 <button
                                     key={document.id}
                                     type="button"
-                                    onClick={() => setSelectedDocumentId(document.id)}
+                                    onClick={() => {
+                                        setActiveCertificationDocumentId(document.id);
+                                        setSelectedDocumentId(document.id);
+                                    }}
                                     className={`flex w-full items-center justify-between rounded-md border px-3 py-2 text-left hover:bg-slate-50 ${selectedDocumentId === document.id ? 'border-blue-200 bg-blue-50 text-blue-800' : 'border-slate-200 bg-slate-50 text-slate-800'}`}
                                 >
                                     <span className="truncate pr-3 font-medium">{document.originalFileName ?? document.id}</span>

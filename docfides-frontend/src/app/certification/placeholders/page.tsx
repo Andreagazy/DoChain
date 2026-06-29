@@ -22,9 +22,11 @@ import {
 } from '@/lib/auth-service';
 import {
     buildCertificationStepHref,
+    getActiveCertificationDocumentId,
     getDefaultPlaceholder,
     loadPdfJsModule,
     normalizeErrorMessage,
+    setActiveCertificationDocumentId,
     type PdfDocumentProxy,
     type PlaceholderConfig,
 } from '@/lib/certification-flow';
@@ -144,17 +146,29 @@ function CertificationPlaceholdersContent() {
                 setMyDocuments(documents.documents);
                 setSignerCandidates(candidates.signers);
 
+                const documentIdFromQuery = searchParams.get('documentId')?.trim() ?? '';
+                const documentIdFromSession = getActiveCertificationDocumentId();
+
                 setSelectedDocumentId((current) => {
-                    const documentIdFromQuery = searchParams.get('documentId')?.trim();
-                    if (documentIdFromQuery && documents.documents.some((document) => document.id === documentIdFromQuery)) {
-                        return documentIdFromQuery;
+                    const candidates = [
+                        documentIdFromQuery,
+                        documentIdFromSession,
+                        current,
+                        documents.documents[0]?.id ?? '',
+                    ];
+                    const selectedId = candidates.find((candidate) =>
+                        candidate && documents.documents.some((document) => document.id === candidate)
+                    ) ?? '';
+
+                    if (selectedId) {
+                        setActiveCertificationDocumentId(selectedId);
                     }
 
-                    if (current && documents.documents.some((document) => document.id === current)) {
-                        return current;
+                    if (documentIdFromQuery) {
+                        router.replace(buildCertificationStepHref('placeholders'), { scroll: false });
                     }
 
-                    return documents.documents[0]?.id ?? '';
+                    return selectedId;
                 });
             } catch (err) {
                 setError(normalizeErrorMessage(err));
@@ -493,6 +507,7 @@ function CertificationPlaceholdersContent() {
                 ...(placeholdersForVisibleSigners.length > 0 ? { placeholders: placeholdersForVisibleSigners } : {}),
             });
 
+            setActiveCertificationDocumentId(selectedDocumentId);
             router.push(buildCertificationStepHref('review', selectedDocumentId));
         });
     };
@@ -613,7 +628,10 @@ function CertificationPlaceholdersContent() {
                                     </div>
 
                                     <div className="flex flex-wrap gap-2">
-                                        <Button variant="outline" className="border-slate-300" onClick={() => router.push(buildCertificationStepHref('signers', selectedDocumentId))}>
+                                        <Button variant="outline" className="border-slate-300" onClick={() => {
+                                            setActiveCertificationDocumentId(selectedDocumentId);
+                                            router.push(buildCertificationStepHref('signers', selectedDocumentId));
+                                        }}>
                                             <ArrowLeft className="mr-2 h-4 w-4" />
                                             Kembali ke Signers
                                         </Button>

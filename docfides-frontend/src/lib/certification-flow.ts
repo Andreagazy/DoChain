@@ -108,7 +108,24 @@ export function getDefaultPlaceholder(index: number): PlaceholderConfig {
 
 export function buildCertificationStepHref(step: CertificationStepKey, documentId?: string): string {
     const basePath = `/certification/${step === 'upload' ? 'upload' : step}`;
-    return documentId ? `${basePath}?documentId=${encodeURIComponent(documentId)}` : basePath;
+    return basePath;
+}
+
+const ACTIVE_CERTIFICATION_DOCUMENT_KEY = 'docchain.activeCertificationDocumentId';
+
+export function setActiveCertificationDocumentId(documentId: string) {
+    if (typeof window === 'undefined' || !documentId) return;
+    window.sessionStorage.setItem(ACTIVE_CERTIFICATION_DOCUMENT_KEY, documentId);
+}
+
+export function getActiveCertificationDocumentId() {
+    if (typeof window === 'undefined') return '';
+    return window.sessionStorage.getItem(ACTIVE_CERTIFICATION_DOCUMENT_KEY) ?? '';
+}
+
+export function clearActiveCertificationDocumentId() {
+    if (typeof window === 'undefined') return;
+    window.sessionStorage.removeItem(ACTIVE_CERTIFICATION_DOCUMENT_KEY);
 }
 
 export function getDocumentNextCertificationStep(status: string, requiredSignerCount?: number): CertificationStepKey {
