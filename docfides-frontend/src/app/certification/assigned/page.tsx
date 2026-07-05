@@ -239,7 +239,8 @@ export default function CertificationAssignedDocumentsPage() {
                 const page = await previewPdfDocument.getPage(previewPage);
                 if (cancelled) return;
 
-                const viewport = page.getViewport({ scale: 1.35 });
+                const previewScale = 1.35;
+                const viewport = page.getViewport({ scale: previewScale });
                 const canvas = previewCanvasRef.current;
                 const context = canvas?.getContext('2d');
 
@@ -326,7 +327,8 @@ export default function CertificationAssignedDocumentsPage() {
                 const page = await signPreviewPdfDocument.getPage(signPreviewPage);
                 if (cancelled) return;
 
-                const viewport = page.getViewport({ scale: 1.35 });
+                const previewScale = 1.35;
+                const viewport = page.getViewport({ scale: previewScale });
                 const canvas = signPreviewCanvasRef.current;
                 const context = canvas?.getContext('2d');
 
@@ -339,8 +341,8 @@ export default function CertificationAssignedDocumentsPage() {
                 canvas.style.width = `${viewport.width}px`;
                 canvas.style.height = `${viewport.height}px`;
                 setSignRenderedPageSize({
-                    pdfWidth: page.view[2] - page.view[0],
-                    pdfHeight: page.view[3] - page.view[1],
+                    pdfWidth: viewport.width / previewScale,
+                    pdfHeight: viewport.height / previewScale,
                     viewWidth: viewport.width,
                     viewHeight: viewport.height,
                 });
