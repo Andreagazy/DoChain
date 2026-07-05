@@ -9,9 +9,9 @@ import { AppShell } from '@/components/layout/app-shell';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
-import { createAdminUser, getUser, listAdminAcademicUnits } from '@/lib/auth-service';
+import { createAdminUser, getUser, listAdminAcademicUnits, listAdminUsers } from '@/lib/auth-service';
 import { normalizeErrorMessage } from '@/lib/certification-flow';
-import type { CreateAdminUserPayload, UserRole } from '@/types/auth';
+import type { AdminUserItem, CreateAdminUserPayload, UserRole } from '@/types/auth';
 
 const roles: UserRole[] = ['SUPERADMIN', 'JURUSAN', 'PRODI', 'ADMIN_PRODI', 'DOSEN', 'MAHASISWA'];
 const employeeTypes: NonNullable<CreateAdminUserPayload['employeeProfile']>['employeeType'][] = ['DOSEN', 'TENAGA_KEPENDIDIKAN', 'ADMINISTRASI'];
@@ -20,6 +20,22 @@ const structuralPositionByRole: Partial<Record<UserRole, 'KAJUR' | 'KAPRODI' | '
     PRODI: 'KAPRODI',
     ADMIN_PRODI: 'ADMIN_PRODI',
 };
+const roleLabels: Record<UserRole, string> = {
+    SUPERADMIN: 'Superadmin',
+    JURUSAN: 'Ketua Jurusan',
+    PRODI: 'Ketua Program Studi',
+    ADMIN_PRODI: 'Admin Prodi',
+    DOSEN: 'Dosen',
+    MAHASISWA: 'Mahasiswa',
+};
+const roleDescriptions: Record<UserRole, string> = {
+    SUPERADMIN: 'Mengelola seluruh sistem. Tidak membutuhkan profil akademik.',
+    JURUSAN: 'Ketua jurusan sebagai level penandatangan tertinggi.',
+    PRODI: 'Ketua program studi sebagai penandatangan prodi.',
+    ADMIN_PRODI: 'Admin prodi untuk verifikasi identitas dan pengelolaan anggota prodi.',
+    DOSEN: 'Dosen sebagai pengguna dan penandatangan dokumen.',
+    MAHASISWA: 'Mahasiswa sebagai pengaju atau penandatangan dokumen akademik.',
+};
 const onlyDigits = (value: string) => value.replace(/\D/g, '');
 const onlyNameCharacters = (value: string) => value.replace(/[^\p{L}\s.'-]/gu, '');
 
@@ -27,6 +43,7 @@ export default function CreateAdminUserPage() {
     const router = useRouter();
     const currentUser = useMemo(() => getUser(), []);
     const [units, setUnits] = useState<Array<{ id: string; code: string; name: string; type: 'JURUSAN' | 'PRODI'; isActive: boolean }>>([]);
+    const [existingUsers, setExistingUsers] = useState<AdminUserItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
@@ -61,8 +78,12 @@ export default function CreateAdminUserPage() {
             }
 
             try {
-                const response = await listAdminAcademicUnits();
-                setUnits(response.units);
+                const [unitResponse, userResponse] = await Promise.all([
+                    listAdminAcademicUnits(),
+                    listAdminUsers(),
+                ]);
+                setUnits(unitResponse.units);
+                setExistingUsers(userResponse.users);
             } catch (err) {
                 setError(normalizeErrorMessage(err));
             } finally {
@@ -78,12 +99,18 @@ export default function CreateAdminUserPage() {
         setSuccess('');
 
         if (!form.email || !form.displayName || !form.password) {
-            setError('Email, nama tampilan, dan password awal wajib diisi.');
+            setError('Email, nama lengkap, dan password awal wajib diisi.');
+            return;
+        }
+
+        const normalizedEmail = form.email.trim().toLowerCase();
+        if (existingUsers.some((user) => user.email.toLowerCase() === normalizedEmail)) {
+            setError('Email sudah terdaftar. Gunakan email lain atau edit user yang sudah ada.');
             return;
         }
 
         const payload: CreateAdminUserPayload = {
-            email: form.email,
+            email: normalizedEmail,
             displayName: form.displayName.trim(),
             role: form.role,
             password: form.password,
@@ -92,6 +119,11 @@ export default function CreateAdminUserPage() {
         if (form.role === 'MAHASISWA') {
             if (!form.nim || !form.prodiId) {
                 setError('NIM dan program studi wajib diisi untuk mahasiswa.');
+                return;
+            }
+
+            if (existingUsers.some((user) => user.studentProfile?.nim === form.nim)) {
+                setError('NIM sudah digunakan oleh mahasiswa lain.');
                 return;
             }
 
@@ -105,6 +137,16 @@ export default function CreateAdminUserPage() {
             const homeUnitId = form.homeUnitId || form.structuralUnitId;
             if (!homeUnitId) {
                 setError('Home unit wajib diisi untuk dosen atau role struktural.');
+                return;
+            }
+
+            if (form.nip && existingUsers.some((user) => user.employeeProfile?.nip === form.nip)) {
+                setError('NIP sudah digunakan oleh pegawai lain.');
+                return;
+            }
+
+            if (form.nidn && existingUsers.some((user) => user.employeeProfile?.nidn === form.nidn)) {
+                setError('NIDN sudah digunakan oleh dosen lain.');
                 return;
             }
 
@@ -127,6 +169,9 @@ export default function CreateAdminUserPage() {
                     academicUnitId: form.structuralUnitId,
                     position: structuralPosition,
                 }];
+            } else if (form.role === 'DOSEN' && form.structuralUnitId) {
+                setError('Dosen biasa tidak perlu unit jabatan struktural. Gunakan role Kaprodi/Kajur/Admin Prodi jika memiliki jabatan struktural.');
+                return;
             }
         }
 
@@ -152,7 +197,7 @@ export default function CreateAdminUserPage() {
     }
 
     return (
-        <AppShell title="Buat User Baru" subtitle="Tambahkan akun dan profil akademik dalam satu halaman.">
+        <AppShell title="Buat User Baru" subtitle="Tambahkan akun berdasarkan peran akademik, lalu lengkapi data yang relevan.">
             <div className="space-y-5">
                 <Button asChild variant="outline" className="border-slate-300">
                     <Link href="/admin/users">
@@ -177,8 +222,8 @@ export default function CreateAdminUserPage() {
 
                 <Card className="border-slate-200 bg-white shadow-sm">
                     <CardHeader>
-                        <CardTitle>Data Akun</CardTitle>
-                        <CardDescription>Isi akun login, role, dan password awal user.</CardDescription>
+                            <CardTitle>Data Akun</CardTitle>
+                            <CardDescription>Isi data login dan pilih peran. Field profil akademik akan mengikuti peran yang dipilih.</CardDescription>
                     </CardHeader>
                     <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                         <div className="space-y-1.5">
@@ -186,8 +231,8 @@ export default function CreateAdminUserPage() {
                             <Input value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value.trim().toLowerCase() }))} placeholder="email@docchain.local" />
                         </div>
                         <div className="space-y-1.5">
-                            <label className="text-xs font-medium text-slate-600">Nama tampilan</label>
-                            <Input value={form.displayName} onChange={(event) => setForm((current) => ({ ...current, displayName: onlyNameCharacters(event.target.value) }))} placeholder="Nama pengguna" />
+                            <label className="text-xs font-medium text-slate-600">Nama lengkap</label>
+                            <Input value={form.displayName} onChange={(event) => setForm((current) => ({ ...current, displayName: onlyNameCharacters(event.target.value) }))} placeholder="Nama sesuai data akademik" />
                         </div>
                         <div className="space-y-1.5">
                             <label className="text-xs font-medium text-slate-600">Role akun</label>
@@ -202,9 +247,10 @@ export default function CreateAdminUserPage() {
                                 }))}
                                 className="h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-sm"
                             >
-                                {roles.map((role) => <option key={role} value={role}>{role}</option>)}
-                            </select>
-                        </div>
+                                    {roles.map((role) => <option key={role} value={role}>{roleLabels[role]}</option>)}
+                                </select>
+                                <p className="text-[11px] leading-4 text-slate-500">{roleDescriptions[form.role]}</p>
+                            </div>
                         <div className="space-y-1.5">
                             <label className="text-xs font-medium text-slate-600">Password awal</label>
                             <Input value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} placeholder="Password" />
@@ -243,8 +289,8 @@ export default function CreateAdminUserPage() {
                 ) : form.role !== 'SUPERADMIN' ? (
                     <Card className="border-blue-100 bg-white shadow-sm">
                         <CardHeader>
-                            <CardTitle>Profil Akademik/Dosen</CardTitle>
-                            <CardDescription>Isi unit, identitas dosen, dan jabatan bila user memiliki role struktural.</CardDescription>
+                            <CardTitle>Profil Akademik Dosen / Staf</CardTitle>
+                            <CardDescription>Isi unit, NIP/NIDN, dan jabatan bila user memiliki peran struktural.</CardDescription>
                         </CardHeader>
                         <CardContent className="grid gap-3 md:grid-cols-3">
                             <div className="space-y-1.5">
@@ -256,7 +302,7 @@ export default function CreateAdminUserPage() {
                                 <Input value={form.nidn} onChange={(event) => setForm((current) => ({ ...current, nidn: onlyDigits(event.target.value).slice(0, 40) }))} placeholder="NIDN dosen" inputMode="numeric" />
                             </div>
                             <div className="space-y-1.5">
-                                <label className="text-xs font-medium text-slate-600">Tipe dosen</label>
+                                <label className="text-xs font-medium text-slate-600">Jenis pegawai</label>
                                 <select value={form.employeeType} onChange={(event) => setForm((current) => ({ ...current, employeeType: event.target.value as typeof form.employeeType }))} className="h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-sm">
                                     {employeeTypes.map((type) => <option key={type} value={type}>{type}</option>)}
                                 </select>

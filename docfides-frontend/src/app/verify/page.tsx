@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useEffect, useState, type ElementType } from 'react';
+import { Suspense, useEffect, useMemo, useState, type ElementType } from 'react';
 import { useSearchParams } from 'next/navigation';
 import axios from 'axios';
 import {
@@ -111,12 +111,6 @@ function formatDocumentStatus(status: string) {
     return map[status] ?? status;
 }
 
-function shortenHash(hash: string | null | undefined): string {
-    if (!hash) return '-';
-    if (hash.length <= 28) return hash;
-    return `${hash.slice(0, 12)}...${hash.slice(-12)}`;
-}
-
 function StatusBanner({ result }: { result: VerifyResult }) {
     const config = result.isRevoked
         ? {
@@ -180,6 +174,43 @@ function InfoTile({ icon: Icon, label, value }: { icon: ElementType; label: stri
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
             </div>
             <p className="mt-2 break-words text-sm font-semibold text-slate-900">{value ?? '-'}</p>
+        </div>
+    );
+}
+
+function SummaryMetric({
+    icon: Icon,
+    label,
+    value,
+    description,
+    tone = 'slate',
+}: {
+    icon: ElementType;
+    label: string;
+    value: string;
+    description: string;
+    tone?: 'emerald' | 'rose' | 'amber' | 'blue' | 'slate';
+}) {
+    const toneClassMap = {
+        emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+        rose: 'border-rose-200 bg-rose-50 text-rose-700',
+        amber: 'border-amber-200 bg-amber-50 text-amber-700',
+        blue: 'border-blue-200 bg-blue-50 text-blue-700',
+        slate: 'border-slate-200 bg-slate-50 text-slate-700',
+    };
+
+    return (
+        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="flex items-start gap-3">
+                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border ${toneClassMap[tone]}`}>
+                    <Icon className="h-5 w-5" />
+                </div>
+                <div className="min-w-0">
+                    <p className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</p>
+                    <p className="mt-1 text-base font-bold text-slate-950">{value}</p>
+                    <p className="mt-1 text-sm leading-5 text-slate-500">{description}</p>
+                </div>
+            </div>
         </div>
     );
 }
@@ -249,15 +280,36 @@ function ProofSummary({ result }: { result: VerifyResult }) {
     const isRevoked = Boolean(record?.revoked);
 
     return (
-        <CardSection title="Bukti Blockchain" description="Ringkasan status pencatatan dokumen pada jaringan blockchain private.">
-            <div className="grid gap-3 md:grid-cols-3">
-                <InfoTile
-                    icon={ShieldCheck}
-                    label="Status On-chain"
-                    value={isRecorded ? (isRevoked ? 'Dicabut' : 'Aktif') : 'Belum tercatat'}
-                />
-                <InfoTile icon={Calendar} label="Waktu Catat" value={formatDate(record?.issuedAt ?? null)} />
-                <InfoTile icon={Hash} label="Tx Hash" value={shortenHash(result.proof.blockchainTxHash)} />
+        <CardSection title="Bukti Blockchain" description="Ringkasan status pencatatan dokumen final pada jaringan blockchain private.">
+            <div className="grid gap-3 lg:grid-cols-3">
+                <div className={`rounded-lg border px-4 py-4 ${isRecorded ? isRevoked ? 'border-rose-200 bg-rose-50' : 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-slate-50'}`}>
+                    <div className="flex items-start gap-3">
+                        <ShieldCheck className={`mt-0.5 h-5 w-5 shrink-0 ${isRecorded ? isRevoked ? 'text-rose-700' : 'text-emerald-700' : 'text-slate-500'}`} />
+                        <div>
+                            <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Status On-chain</p>
+                            <p className={`mt-1 text-lg font-bold ${isRecorded ? isRevoked ? 'text-rose-900' : 'text-emerald-900' : 'text-slate-900'}`}>
+                                {isRecorded ? (isRevoked ? 'Dicabut' : 'Aktif') : 'Belum tercatat'}
+                            </p>
+                            <p className="mt-1 text-sm leading-5 text-slate-600">
+                                {isRecorded ? 'Hash dokumen ditemukan pada smart contract DOCChain.' : 'Hash dokumen belum ditemukan pada smart contract DOCChain.'}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <InfoTile icon={Calendar} label="Waktu Pencatatan" value={formatDate(record?.issuedAt ?? null)} />
+                <InfoTile icon={Link2} label="Penyimpanan IPFS" value={result.proof.ipfsHash ? 'CID tersedia' : 'Belum tersedia'} />
+            </div>
+
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Hash Dokumen On-chain</p>
+                    <p className="mt-2 break-all font-mono text-xs leading-5 text-slate-800">{record?.documentHash ?? '-'}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Blockchain TX Hash</p>
+                    <p className="mt-2 break-all font-mono text-xs leading-5 text-slate-800">{result.proof.blockchainTxHash ?? '-'}</p>
+                </div>
             </div>
         </CardSection>
     );
@@ -311,18 +363,68 @@ function TechnicalProof({ result }: { result: VerifyResult }) {
 function VerifyContent() {
     const searchParams = useSearchParams();
     const documentId = searchParams.get('documentId')?.trim() ?? '';
-    const [loading, setLoading] = useState(true);
+    const hasDocumentId = Boolean(documentId);
+    const [loading, setLoading] = useState(hasDocumentId);
     const [result, setResult] = useState<VerifyResult | null>(null);
     const [error, setError] = useState('');
 
+    const summaryItems = useMemo(() => {
+        if (!result) return [];
+
+        const record = result.proof.blockchain;
+        const signedCount = result.signers.filter((signer) => signer.status === 'SIGNED').length;
+
+        return [
+            {
+                icon: result.isRevoked ? XCircle : result.isValid ? CheckCircle2 : AlertTriangle,
+                label: 'Keputusan',
+                value: result.isRevoked ? 'Tidak berlaku' : result.isValid ? 'Valid' : 'Belum valid',
+                description: result.isRevoked
+                    ? 'Dokumen sudah dicabut dan tidak dapat digunakan sebagai dokumen aktif.'
+                    : result.isValid
+                        ? 'Dokumen final tercatat dan masih aktif.'
+                        : 'Dokumen ditemukan, tetapi proses atau statusnya belum memenuhi syarat final aktif.',
+                tone: result.isRevoked ? 'rose' : result.isValid ? 'emerald' : 'amber',
+            },
+            {
+                icon: ShieldCheck,
+                label: 'Blockchain',
+                value: record?.exists ? (record.revoked ? 'Dicabut' : 'Tercatat') : 'Belum tercatat',
+                description: record?.exists
+                    ? 'Data dokumen ditemukan pada smart contract DOCChain.'
+                    : 'Belum ada catatan hash dokumen pada blockchain.',
+                tone: record?.exists ? record.revoked ? 'rose' : 'emerald' : 'slate',
+            },
+            {
+                icon: User,
+                label: 'Penandatangan',
+                value: `${signedCount}/${result.signers.length}`,
+                description: 'Jumlah penandatangan yang sudah menyelesaikan tanda tangan.',
+                tone: signedCount === result.signers.length && result.signers.length > 0 ? 'emerald' : 'blue',
+            },
+            {
+                icon: Link2,
+                label: 'IPFS',
+                value: result.proof.ipfsHash ? 'Tersedia' : 'Belum tersedia',
+                description: result.proof.ipfsHash
+                    ? 'Dokumen final memiliki CID IPFS.'
+                    : 'CID IPFS belum tersedia untuk dokumen ini.',
+                tone: result.proof.ipfsHash ? 'blue' : 'slate',
+            },
+        ] as Array<{
+            icon: ElementType;
+            label: string;
+            value: string;
+            description: string;
+            tone: 'emerald' | 'rose' | 'amber' | 'blue' | 'slate';
+        }>;
+    }, [result]);
+
     useEffect(() => {
         if (!documentId) {
-            setError('ID dokumen tidak ditemukan pada QR code ini.');
-            setLoading(false);
             return;
         }
 
-        setLoading(true);
         axios
             .get<VerifyResult>(`${API_BASE}/public/documents/${encodeURIComponent(documentId)}/verify`)
             .then((res) => setResult(res.data))
@@ -334,6 +436,21 @@ function VerifyContent() {
             })
             .finally(() => setLoading(false));
     }, [documentId]);
+
+    if (!hasDocumentId) {
+        return (
+            <div className="flex min-h-screen flex-col items-center justify-center bg-[#f6f8fb] px-4">
+                <div className="w-full max-w-md rounded-lg border border-rose-200 bg-white p-8 text-center shadow-sm">
+                    <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-lg bg-rose-100">
+                        <XCircle className="h-8 w-8 text-rose-700" />
+                    </div>
+                    <h1 className="mt-4 text-xl font-bold text-slate-950">Verifikasi Gagal</h1>
+                    <p className="mt-2 text-sm leading-6 text-slate-600">ID dokumen tidak ditemukan pada QR code ini.</p>
+                </div>
+                <p className="mt-5 text-xs text-slate-400">DOCChain - Sistem Sertifikasi Dokumen Digital</p>
+            </div>
+        );
+    }
 
     if (loading) {
         return (
@@ -397,39 +514,45 @@ function VerifyContent() {
                     </section>
                 ) : null}
 
-                <div className="grid gap-5 lg:grid-cols-[1fr_360px]">
-                    <div className="space-y-5">
-                        <CardSection title="Informasi Dokumen">
-                            <div className="grid gap-3 md:grid-cols-2">
-                                <InfoTile icon={FileText} label="Nama Dokumen" value={result.originalFileName} />
-                                <InfoTile icon={User} label="Pemilik" value={result.owner?.displayName} />
-                                <InfoTile
-                                    icon={Building2}
-                                    label={result.owner?.unitType === 'JURUSAN' ? 'Jurusan' : 'Program Studi'}
-                                    value={result.owner?.unitName}
-                                />
-                                <InfoTile
-                                    icon={Calendar}
-                                    label="Tanggal Final"
-                                    value={result.completedAt ? formatDate(result.completedAt) : 'Belum selesai'}
-                                />
-                            </div>
-                        </CardSection>
-
-                        {result.signers.length > 0 ? <SignerTimeline signers={result.signers} /> : null}
+                <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="flex flex-col gap-2 border-b border-slate-100 pb-4 md:flex-row md:items-start md:justify-between">
+                        <div>
+                            <h2 className="text-base font-bold text-slate-950">Ringkasan Verifikasi</h2>
+                            <p className="mt-1 text-sm text-slate-500">Informasi utama hasil pemindaian QR dokumen.</p>
+                        </div>
+                        <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-bold uppercase text-slate-600">
+                            {result.isValid && !result.isRevoked ? 'Terverifikasi' : 'Tidak aktif'}
+                        </div>
                     </div>
+                    <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        {summaryItems.map((item) => (
+                            <SummaryMetric key={item.label} {...item} />
+                        ))}
+                    </div>
+                </section>
 
-                    <aside className="space-y-5">
-                        <ProofSummary result={result} />
-                        <CardSection title="Ringkasan">
-                            <div className="space-y-3">
-                                <InfoTile icon={Calendar} label="Dibuat" value={formatShortDate(result.createdAt)} />
-                                <InfoTile icon={Link2} label="IPFS" value={result.proof.ipfsHash ? 'Tersedia' : 'Belum tersedia'} />
-                                <InfoTile icon={Hash} label="Hash On-chain" value={shortenHash(result.proof.blockchain?.documentHash)} />
-                            </div>
-                        </CardSection>
-                    </aside>
-                </div>
+                <CardSection title="Informasi Dokumen">
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                        <InfoTile icon={FileText} label="Nama Dokumen" value={result.originalFileName} />
+                        <InfoTile icon={User} label="Pemilik" value={result.owner?.displayName} />
+                        <InfoTile
+                            icon={Building2}
+                            label={result.owner?.unitType === 'JURUSAN' ? 'Jurusan' : 'Program Studi'}
+                            value={result.owner?.unitName}
+                        />
+                        <InfoTile
+                            icon={Calendar}
+                            label="Tanggal Final"
+                            value={result.completedAt ? formatDate(result.completedAt) : 'Belum selesai'}
+                        />
+                        <InfoTile icon={Clock} label="Tanggal Dibuat" value={formatShortDate(result.createdAt)} />
+                        <InfoTile icon={Hash} label="Status Dokumen" value={formatDocumentStatus(result.status)} />
+                    </div>
+                </CardSection>
+
+                <ProofSummary result={result} />
+
+                {result.signers.length > 0 ? <SignerTimeline signers={result.signers} /> : null}
 
                 <TechnicalProof result={result} />
 

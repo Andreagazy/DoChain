@@ -14,11 +14,7 @@ import {
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Loader2, AlertCircle, CheckCircle2, Mail } from 'lucide-react';
 import { requestOtp } from '@/lib/auth-service';
-import { AxiosError } from 'axios';
-
-type ApiError = {
-    message?: string | string[];
-};
+import { normalizeErrorMessage } from '@/lib/certification-flow';
 
 interface OtpRequestFormProps {
     onOtpRequested: (email: string) => void;
@@ -64,12 +60,7 @@ export default function OtpRequestForm({ onOtpRequested }: OtpRequestFormProps) 
             onOtpRequested(normalizedEmail);
             setEmail('');
         } catch (err: unknown) {
-            const error = err as AxiosError<ApiError>;
-            const responseMessage = error.response?.data?.message;
-            const normalizedMessage = Array.isArray(responseMessage)
-                ? responseMessage.join(', ')
-                : responseMessage;
-            setError(normalizedMessage ?? error.message ?? 'Gagal mengirim OTP. Silakan coba lagi.');
+            setError(normalizeErrorMessage(err));
         } finally {
             setLoading(false);
         }

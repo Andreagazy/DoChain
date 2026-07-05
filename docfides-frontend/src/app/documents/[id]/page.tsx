@@ -3,17 +3,19 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowRight, CheckCircle2, Clock3, FileText, Loader2, PenLine, UserCheck, Users, XCircle } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Clock3, FileText, Loader2, UploadCloud, UserCheck, Users, XCircle } from 'lucide-react';
 import { AxiosError } from 'axios';
 import { AppShell } from '@/components/layout/app-shell';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import {
     getCertificationDocumentDetail,
     getCertificationDocumentFile,
     getCertificationEligibility,
+    requestDocumentRevoke,
 } from '@/lib/auth-service';
 import { buildCertificationStepHref, getDocumentNextCertificationStep, setActiveCertificationDocumentId } from '@/lib/certification-flow';
 import type { CertificationDocumentDetailResponse, CertificationEligibilityResponse } from '@/types/auth';
@@ -92,6 +94,9 @@ export default function DocumentDetailPage() {
     const [eligibility, setEligibility] = useState<CertificationEligibilityResponse | null>(null);
     const [detail, setDetail] = useState<CertificationDocumentDetailResponse | null>(null);
     const [previewUrl, setPreviewUrl] = useState('');
+    const [revokeReason, setRevokeReason] = useState('');
+    const [revokeEvidenceFiles, setRevokeEvidenceFiles] = useState<File[]>([]);
+    const [submittingRevokeRequest, setSubmittingRevokeRequest] = useState(false);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
 
@@ -142,6 +147,43 @@ export default function DocumentDetailPage() {
     const signingProcess = detail?.signingProcess ?? [];
     const signedCount = signingProcess.filter((item) => item.status === 'SIGNED').length;
     const declinedSigner = signingProcess.find((item) => item.status === 'DECLINED' || item.status === 'REJECTED');
+    const latestRevokeRequest = detail?.revokeRequests?.[0] ?? null;
+
+    const refreshDetail = async () => {
+        const detailRes = await getCertificationDocumentDetail(documentId);
+        setDetail(detailRes);
+    };
+
+    const handleSubmitRevokeRequest = async () => {
+        setError('');
+        if (revokeReason.trim().length < 10) {
+            setError('Alasan request pencabutan minimal 10 karakter.');
+            return;
+        }
+
+        if (revokeEvidenceFiles.length < 2) {
+            setError('Upload minimal 2 gambar bukti untuk request pencabutan.');
+            return;
+        }
+
+        setSubmittingRevokeRequest(true);
+        try {
+            const result = await requestDocumentRevoke(
+                documentId,
+                revokeReason.trim(),
+                revokeEvidenceFiles,
+            );
+            setRevokeReason('');
+            setRevokeEvidenceFiles([]);
+            await refreshDetail();
+            setError('');
+            window.alert(result.message);
+        } catch (err) {
+            setError(normalizeErrorMessage(err));
+        } finally {
+            setSubmittingRevokeRequest(false);
+        }
+    };
 
     return (
         <AppShell title="Detail Dokumen" subtitle="Lihat preview dokumen dan proses tanda tangan.">
@@ -266,6 +308,81 @@ export default function DocumentDetailPage() {
                                         <p className="mt-1 truncate font-semibold text-slate-900">{detail.document.finalFileName ?? '-'}</p>
                                         <p className="text-xs text-slate-500">{formatFileSize(detail.document.finalFileSize)}</p>
                                     </div>
+                                </CardContent>
+                            </Card>
+
+                            <Card className="rounded-xl border-red-100 bg-white shadow-sm">
+                                <CardHeader>
+                                    <CardTitle>Request Pencabutan</CardTitle>
+                                    <CardDescription>
+                                        Ajukan pencabutan jika dokumen final memiliki kesalahan. Request akan direview superadmin.
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                    {latestRevokeRequest ? (
+                                        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                                            <p className="font-bold">Request terakhir: {latestRevokeRequest.status === 'PENDING' ? 'Menunggu Review' : latestRevokeRequest.status === 'APPROVED' ? 'Disetujui' : 'Ditolak'}</p>
+                                            <p className="mt-1">{latestRevokeRequest.reason}</p>
+                                            <p className="mt-1 text-xs">{formatDateTime(latestRevokeRequest.createdAt)} | {latestRevokeRequest.evidences.length} bukti</p>
+                                            {latestRevokeRequest.reviewNote ? (
+                                                <p className="mt-2 text-xs">Catatan admin: {latestRevokeRequest.reviewNote}</p>
+                                            ) : null}
+                                        </div>
+                                    ) : null}
+
+                                    {detail.document.status === 'FULLY_SIGNED' && latestRevokeRequest?.status !== 'PENDING' ? (
+                                        <div className="space-y-3">
+                                            <div className="space-y-1.5">
+                                                <label className="text-xs font-bold uppercase tracking-wider text-slate-500">Alasan pencabutan</label>
+                                                <textarea
+                                                    value={revokeReason}
+                                                    onChange={(event) => setRevokeReason(event.target.value.slice(0, 700))}
+                                                    placeholder="Contoh: Terdapat kesalahan data pada dokumen final dan perlu diterbitkan ulang."
+                                                    className="min-h-24 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-red-400 focus:ring-2 focus:ring-red-100"
+                                                />
+                                                <p className="text-xs text-slate-500">Alasan minimal 10 karakter dan akan dibaca superadmin.</p>
+                                            </div>
+                                            <div className="space-y-1.5">
+                                                <label className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-slate-500">
+                                                    <UploadCloud className="h-4 w-4" />
+                                                    Bukti gambar
+                                                </label>
+                                                <Input
+                                                    type="file"
+                                                    accept="image/png,image/jpeg,image/jpg,image/webp"
+                                                    multiple
+                                                    onChange={(event) => {
+                                                        const files = Array.from(event.target.files ?? []);
+                                                        const validFiles = files.filter((file) => file.size <= 3 * 1024 * 1024);
+                                                        if (validFiles.length !== files.length) {
+                                                            setError('Setiap gambar bukti maksimal 3MB.');
+                                                        }
+                                                        setRevokeEvidenceFiles(validFiles.slice(0, 5));
+                                                    }}
+                                                />
+                                                <p className="text-xs text-slate-500">Minimal 2 gambar, maksimal 5 gambar. Format jpg, png, atau webp.</p>
+                                                {revokeEvidenceFiles.length > 0 ? (
+                                                    <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                                                        {revokeEvidenceFiles.map((file) => (
+                                                            <p key={`${file.name}-${file.size}`}>{file.name}</p>
+                                                        ))}
+                                                    </div>
+                                                ) : null}
+                                            </div>
+                                            <Button
+                                                className="w-full bg-red-600 hover:bg-red-700"
+                                                onClick={() => void handleSubmitRevokeRequest()}
+                                                disabled={submittingRevokeRequest || revokeReason.trim().length < 10 || revokeEvidenceFiles.length < 2}
+                                            >
+                                                {submittingRevokeRequest ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+                                                Ajukan Request Pencabutan
+                                            </Button>
+                                        </div>
+                                    ) : latestRevokeRequest?.status === 'PENDING' ? (
+                                        <p className="text-sm text-slate-500">Form dikunci karena request pencabutan sedang menunggu review.</p>
+                                    ) : (
+                                        <p className="text-sm text-slate-500">Request pencabutan hanya tersedia untuk dokumen final yang belum dicabut.</p>
+                                    )}
                                 </CardContent>
                             </Card>
                         </div>

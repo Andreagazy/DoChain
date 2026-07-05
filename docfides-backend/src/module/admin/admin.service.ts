@@ -7,6 +7,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateAdminUserDto, UpdateAdminUserDto } from './dto/update-admin-user.dto';
 import { CreateAcademicUnitDto, UpdateAcademicUnitDto } from './dto/manage-academic-unit.dto';
 import { RevokeDocumentDto } from './dto/revoke-document.dto';
+import { ReviewDocumentRevokeRequestDto } from './dto/review-document-revoke-request.dto';
 import { ReviewIdentityDto } from '../identity/dto/review-identity.dto';
 import { BlockchainService } from '../blockchain/blockchain.service';
 
@@ -141,24 +142,61 @@ export class AdminService {
       throw new BadRequestException('Email sudah terdaftar');
     }
 
+    await this.validateCreateUserAcademicFlow(dto);
+    await this.ensureUniqueAcademicIdentifiers(dto, null);
+
     const passwordHash = await hash(dto.password ?? 'User123!', 10);
 
-    const created = await this.prisma.user.create({
-      data: {
-        email,
-        displayName: dto.displayName.trim(),
-        role: dto.role,
-        status: 'ACTIVE',
-        emailVerifiedAt: new Date(),
-        passwordHash,
-      },
-      select: { id: true },
-    });
+    const created = await this.prisma.$transaction(async (tx) => {
+      const user = await tx.user.create({
+        data: {
+          email,
+          displayName: dto.displayName.trim(),
+          role: dto.role,
+          status: 'ACTIVE',
+          emailVerifiedAt: new Date(),
+          passwordHash,
+          ...(dto.studentProfile
+            ? {
+                studentProfile: {
+                  create: {
+                    nim: dto.studentProfile.nim,
+                    prodiId: dto.studentProfile.prodiId,
+                    angkatan: dto.studentProfile.angkatan ?? null,
+                    kelas: dto.studentProfile.kelas ?? null,
+                  },
+                },
+              }
+            : {}),
+          ...(dto.employeeProfile
+            ? {
+                employeeProfile: {
+                  create: {
+                    nip: dto.employeeProfile.nip || null,
+                    nidn: dto.employeeProfile.nidn || null,
+                    employeeType: dto.employeeProfile.employeeType,
+                    homeUnitId: dto.employeeProfile.homeUnitId,
+                    positionTitle: dto.employeeProfile.positionTitle || null,
+                  },
+                },
+              }
+            : {}),
+        },
+        select: { id: true },
+      });
 
-    await this.updateUser(created.id, {
-      studentProfile: dto.studentProfile,
-      employeeProfile: dto.employeeProfile,
-      structuralAssignments: dto.structuralAssignments,
+      if (dto.structuralAssignments?.length) {
+        await tx.structuralAssignment.createMany({
+          data: dto.structuralAssignments.map((assignment) => ({
+            userId: user.id,
+            academicUnitId: assignment.academicUnitId,
+            position: assignment.position,
+            isActive: true,
+          })),
+        });
+      }
+
+      return user;
     });
 
     return this.getUser(created.id);
@@ -180,6 +218,8 @@ export class AdminService {
     if (scope.prodiIds) {
       await this.ensureAdminProdiCanUpdateUser(userId, user.role, dto, scope.prodiIds);
     }
+
+    await this.ensureUniqueAcademicIdentifiers(dto, userId);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.user.update({
@@ -833,6 +873,174 @@ export class AdminService {
     };
   }
 
+  async listDocumentRevokeRequests() {
+    const requests = await this.prisma.documentRevokeRequest.findMany({
+      orderBy: [{ status: 'asc' }, { createdAt: 'desc' }],
+      select: {
+        id: true,
+        reason: true,
+        status: true,
+        reviewNote: true,
+        reviewedAt: true,
+        createdAt: true,
+        updatedAt: true,
+        requester: {
+          select: {
+            email: true,
+            displayName: true,
+            role: true,
+            identity: { select: { fullName: true } },
+          },
+        },
+        reviewedBy: {
+          select: {
+            email: true,
+            displayName: true,
+            role: true,
+          },
+        },
+        document: {
+          select: {
+            id: true,
+            originalFileName: true,
+            finalFileName: true,
+            status: true,
+            finalFileHash: true,
+            finalFileIpfsHash: true,
+            updatedAt: true,
+            user: {
+              select: {
+                email: true,
+                displayName: true,
+                identity: { select: { fullName: true } },
+              },
+            },
+          },
+        },
+        evidences: {
+          select: {
+            id: true,
+            originalFileName: true,
+            mimeType: true,
+            sizeBytes: true,
+            createdAt: true,
+          },
+        },
+      },
+    });
+
+    return { requests };
+  }
+
+  async getDocumentRevokeEvidence(requestId: string, evidenceId: string) {
+    const evidence = await this.prisma.documentRevokeRequestEvidence.findFirst({
+      where: { id: evidenceId, requestId },
+      select: {
+        originalFileName: true,
+        storagePath: true,
+        mimeType: true,
+      },
+    });
+
+    if (!evidence) {
+      throw new NotFoundException('Bukti request pencabutan tidak ditemukan');
+    }
+
+    const evidencePath = resolve(evidence.storagePath);
+    if (!existsSync(evidencePath)) {
+      throw new NotFoundException('File bukti request pencabutan tidak ditemukan');
+    }
+
+    return {
+      fileName: evidence.originalFileName,
+      mimeType: evidence.mimeType,
+      content: readFileSync(evidencePath),
+    };
+  }
+
+  async reviewDocumentRevokeRequest(
+    reviewerId: string,
+    requestId: string,
+    dto: ReviewDocumentRevokeRequestDto,
+  ) {
+    const request = await this.prisma.documentRevokeRequest.findUnique({
+      where: { id: requestId },
+      select: {
+        id: true,
+        documentId: true,
+        reason: true,
+        status: true,
+        document: {
+          select: {
+            id: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Request pencabutan tidak ditemukan');
+    }
+
+    if (request.status !== 'PENDING') {
+      throw new BadRequestException('Request pencabutan sudah direview');
+    }
+
+    if (dto.status === 'REJECTED') {
+      const updated = await this.prisma.documentRevokeRequest.update({
+        where: { id: requestId },
+        data: {
+          status: 'REJECTED',
+          reviewedById: reviewerId,
+          reviewedAt: new Date(),
+          reviewNote: dto.reviewNote?.trim() || 'Request pencabutan ditolak',
+        },
+        select: {
+          id: true,
+          status: true,
+          reviewNote: true,
+          reviewedAt: true,
+        },
+      });
+
+      return {
+        message: 'Request pencabutan ditolak',
+        request: updated,
+      };
+    }
+
+    if (request.document.status === 'REVOKED') {
+      throw new BadRequestException('Dokumen sudah dicabut');
+    }
+
+    const revokeResult = await this.revokeDocument(reviewerId, request.documentId, {
+      reason: request.reason,
+    });
+
+    const updated = await this.prisma.documentRevokeRequest.update({
+      where: { id: requestId },
+      data: {
+        status: 'APPROVED',
+        reviewedById: reviewerId,
+        reviewedAt: new Date(),
+        reviewNote: dto.reviewNote?.trim() || 'Request disetujui dan dokumen dicabut',
+      },
+      select: {
+        id: true,
+        status: true,
+        reviewNote: true,
+        reviewedAt: true,
+      },
+    });
+
+    return {
+      message: 'Request disetujui dan dokumen berhasil dicabut',
+      request: updated,
+      document: revokeResult.document,
+    };
+  }
+
   async getDocumentFile(requesterUserId: string, documentId: string) {
     const scope = await this.getAccessScope(requesterUserId);
     const document = await this.prisma.document.findFirst({
@@ -895,6 +1103,107 @@ export class AdminService {
 
     if (type && unit.type !== type) {
       throw new BadRequestException(`Unit akademik harus bertipe ${type}`);
+    }
+  }
+
+  private async validateCreateUserAcademicFlow(dto: CreateAdminUserDto) {
+    if (dto.role === 'SUPERADMIN') {
+      if (dto.studentProfile || dto.employeeProfile || dto.structuralAssignments?.length) {
+        throw new BadRequestException('Superadmin tidak membutuhkan profil akademik');
+      }
+      return;
+    }
+
+    if (dto.role === 'MAHASISWA') {
+      if (!dto.studentProfile) {
+        throw new BadRequestException('Profil mahasiswa wajib diisi untuk role mahasiswa');
+      }
+
+      if (dto.employeeProfile || dto.structuralAssignments?.length) {
+        throw new BadRequestException('Mahasiswa tidak boleh memiliki profil pegawai atau jabatan struktural');
+      }
+
+      await this.ensureUnit(dto.studentProfile.prodiId, 'PRODI');
+      return;
+    }
+
+    if (dto.studentProfile) {
+      throw new BadRequestException('Profil mahasiswa hanya boleh digunakan untuk role mahasiswa');
+    }
+
+    if (!dto.employeeProfile) {
+      throw new BadRequestException('Profil dosen/staf wajib diisi untuk role non-mahasiswa');
+    }
+
+    const structuralPositionByRole: Partial<Record<string, string>> = {
+      JURUSAN: 'KAJUR',
+      PRODI: 'KAPRODI',
+      ADMIN_PRODI: 'ADMIN_PRODI',
+    };
+    const requiredPosition = structuralPositionByRole[dto.role];
+
+    if (requiredPosition) {
+      const expectedUnitType = dto.role === 'JURUSAN' ? 'JURUSAN' : 'PRODI';
+      if (!dto.structuralAssignments?.length) {
+        throw new BadRequestException('Jabatan struktural wajib diisi untuk role ini');
+      }
+
+      for (const assignment of dto.structuralAssignments) {
+        if (assignment.position !== requiredPosition) {
+          throw new BadRequestException(`Jabatan struktural untuk role ${dto.role} harus ${requiredPosition}`);
+        }
+        await this.ensureUnit(assignment.academicUnitId, expectedUnitType);
+      }
+    } else if (dto.structuralAssignments?.length) {
+      throw new BadRequestException('Jabatan struktural hanya boleh diisi untuk kajur, kaprodi, atau admin prodi');
+    }
+
+    await this.ensureUnit(dto.employeeProfile.homeUnitId);
+  }
+
+  private async ensureUniqueAcademicIdentifiers(
+    dto: Pick<UpdateAdminUserDto, 'studentProfile' | 'employeeProfile'>,
+    currentUserId: string | null,
+  ) {
+    const studentProfile = dto.studentProfile;
+    if (studentProfile) {
+      const nim = studentProfile.nim.trim();
+      const existingNim = await this.prisma.studentProfile.findUnique({
+        where: { nim },
+        select: { userId: true },
+      });
+
+      if (existingNim && existingNim.userId !== currentUserId) {
+        throw new BadRequestException('NIM sudah digunakan oleh mahasiswa lain');
+      }
+    }
+
+    const employeeProfile = dto.employeeProfile;
+    if (employeeProfile) {
+      const nip = employeeProfile.nip?.trim() || null;
+      const nidn = employeeProfile.nidn?.trim() || null;
+
+      if (nip) {
+        const existingNip = await this.prisma.employeeProfile.findUnique({
+          where: { nip },
+          select: { userId: true },
+        });
+
+        if (existingNip && existingNip.userId !== currentUserId) {
+          throw new BadRequestException('NIP sudah digunakan oleh pegawai lain');
+        }
+      }
+
+      if (nidn) {
+        const existingNidn = await this.prisma.employeeProfile.findUnique({
+          where: { nidn },
+          select: { userId: true },
+        });
+
+        if (existingNidn && existingNidn.userId !== currentUserId) {
+          throw new BadRequestException('NIDN sudah digunakan oleh dosen lain');
+        }
+      }
     }
   }
 

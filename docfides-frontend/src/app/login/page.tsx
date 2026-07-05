@@ -7,11 +7,7 @@ import {
   Loader2, AlertCircle, Eye, EyeOff, ShieldCheck, Mail, Lock,
 } from 'lucide-react';
 import { getDefaultHomePath, getProfile, getToken, login, logout, saveAuthData } from '@/lib/auth-service';
-import { AxiosError } from 'axios';
-
-type ApiError = {
-  message?: string | string[];
-};
+import { normalizeErrorMessage } from '@/lib/certification-flow';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -73,10 +69,7 @@ export default function LoginPage() {
       saveAuthData(response.access_token, response.user);
       router.push(getDefaultHomePath(response.user));
     } catch (err: unknown) {
-      const axiosErr = err as AxiosError<ApiError>;
-      const msg = axiosErr.response?.data?.message;
-      const normalized = Array.isArray(msg) ? msg.join(', ') : msg;
-      setError(normalized ?? axiosErr.message ?? 'Login gagal. Silakan coba lagi.');
+      setError(normalizeErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -140,17 +133,18 @@ export default function LoginPage() {
             <img src="/image/docchain-logo.png" alt="DOCChain" className="h-14 w-14 object-contain" />
           </div>
 
-          <h2 className="text-xl font-bold text-gray-900 mb-8">Selamat Datang!</h2>
-          {/* Error */}
-          {error && (
-            <div className="mb-4 flex w-full items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3.5 py-3">
-              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
-              <p className="text-xs font-medium text-red-700">{error}</p>
-            </div>
-          )}
+          <h2 className="mb-6 text-xl font-bold text-gray-900">Selamat Datang!</h2>
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="w-full space-y-3">
+            {/* Error */}
+            {error && (
+              <div className="flex min-h-11 w-full items-center gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5">
+                <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
+                <p className="text-sm font-semibold leading-5 text-red-700">{error}</p>
+              </div>
+            )}
+
             {/* Email */}
             <div className="relative">
               <Input

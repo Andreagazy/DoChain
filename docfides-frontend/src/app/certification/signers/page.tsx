@@ -40,8 +40,27 @@ const SIGNER_ROLE_RANK: Record<string, number> = {
     SUPERADMIN: 60,
 };
 
+const SIGNER_ROLE_LABEL: Record<string, string> = {
+    MAHASISWA: 'Mahasiswa',
+    DOSEN: 'Dosen',
+    ADMIN_PRODI: 'Admin Prodi',
+    PRODI: 'Kaprodi',
+    JURUSAN: 'Kajur',
+    SUPERADMIN: 'Superadmin',
+};
+
+const SIGNER_ROLE_OPTIONS = Object.entries(SIGNER_ROLE_RANK)
+    .sort(([, rankA], [, rankB]) => rankA - rankB)
+    .map(([role]) => ({
+        value: role,
+        label: SIGNER_ROLE_LABEL[role] ?? role.replace(/_/g, ' '),
+    }));
+
 const getSignerDisplayName = (signer?: Pick<SignerCandidate, 'certificateName' | 'fullName' | 'displayName' | 'email'> | null) =>
     signer?.certificateName ?? signer?.fullName ?? signer?.displayName ?? signer?.email ?? 'Signer';
+
+const getSignerRoleLabel = (role?: string | null) =>
+    role ? SIGNER_ROLE_LABEL[role] ?? role.replace(/_/g, ' ') : 'Role tidak diketahui';
 
 function CertificationSignersContent() {
     const router = useRouter();
@@ -60,6 +79,7 @@ function CertificationSignersContent() {
     const [signerCandidates, setSignerCandidates] = useState<SignerCandidate[]>([]);
     const [selectedDocumentId, setSelectedDocumentId] = useState('');
     const [signerSearch, setSignerSearch] = useState('');
+    const [signerRoleFilter, setSignerRoleFilter] = useState('ALL');
     const [orderedSignerIds, setOrderedSignerIds] = useState<string[]>([]);
     const [placeholderBySignerId, setPlaceholderBySignerId] = useState<Record<string, PlaceholderConfig | null>>({});
 
@@ -134,14 +154,19 @@ function CertificationSignersContent() {
                 return false;
             }
 
+            if (signerRoleFilter !== 'ALL' && option.role !== signerRoleFilter) {
+                return false;
+            }
+
             if (!term) {
                 return true;
             }
 
             const label = getSignerDisplayName(option).toLowerCase();
-            return label.includes(term) || option.email.toLowerCase().includes(term);
+            const roleLabel = getSignerRoleLabel(option.role).toLowerCase();
+            return label.includes(term) || option.email.toLowerCase().includes(term) || roleLabel.includes(term);
         });
-    }, [orderedSignerIds, signerOptions, signerSearch]);
+    }, [orderedSignerIds, signerOptions, signerRoleFilter, signerSearch]);
 
     const execute = async (action: string, fn: () => Promise<void>) => {
         setError('');
@@ -398,11 +423,25 @@ function CertificationSignersContent() {
                         <CardDescription>Pilih penandatangan yang diperlukan. Sistem akan menyusunnya otomatis mengikuti alur akademik yang berlaku.</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
-                        <Input
-                            value={signerSearch}
-                            onChange={(event) => setSignerSearch(event.target.value)}
-                            placeholder="Cari calon signer (nama atau email)"
-                        />
+                        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
+                            <Input
+                                value={signerSearch}
+                                onChange={(event) => setSignerSearch(event.target.value)}
+                                placeholder="Cari calon signer (nama, email, atau role)"
+                            />
+                            <select
+                                value={signerRoleFilter}
+                                onChange={(event) => setSignerRoleFilter(event.target.value)}
+                                className="h-10 rounded-md border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 outline-none transition focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                            >
+                                <option value="ALL">Semua role</option>
+                                {SIGNER_ROLE_OPTIONS.map((role) => (
+                                    <option key={role.value} value={role.value}>
+                                        {role.label}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
 
                         <div className="max-h-56 overflow-y-auto rounded-md border border-slate-200 bg-white">
                             {availableSignerOptions.length === 0 ? (
@@ -411,8 +450,13 @@ function CertificationSignersContent() {
                                 availableSignerOptions.map((signer) => (
                                     <div key={signer.id} className="flex items-center justify-between gap-3 border-b border-slate-100 px-3 py-2 last:border-b-0">
                                         <div className="min-w-0">
-                                            <p className="truncate text-sm font-medium text-slate-900">{getSignerDisplayName(signer)}</p>
-                                            <p className="truncate text-xs text-slate-500">{signer.email}</p>
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <p className="truncate text-sm font-medium text-slate-900">{getSignerDisplayName(signer)}</p>
+                                                <Badge variant="neutral" className="rounded-full border border-slate-200 bg-slate-50 text-[10px] font-bold uppercase tracking-wide text-slate-600">
+                                                    {getSignerRoleLabel(signer.role)}
+                                                </Badge>
+                                            </div>
+                                            <p className="mt-0.5 truncate text-xs text-slate-500">{signer.email}</p>
                                         </div>
                                         <Button variant="outline" className="border-slate-300" onClick={() => addSigner(signer.id)}>
                                             <Plus className="mr-2 h-4 w-4" />
@@ -438,7 +482,6 @@ function CertificationSignersContent() {
                         ) : (
                             orderedSignerIds.map((signerId, index) => {
                                 const signer = signerById.get(signerId);
-                                const isVisibleSigner = signerPreferenceById.get(signerId) === 'visible';
                                 const placeholder = placeholderBySignerId[signerId];
                                 const canMoveUp = canMoveSigner(index, -1);
                                 const canMoveDown = canMoveSigner(index, 1);
@@ -450,7 +493,7 @@ function CertificationSignersContent() {
                                                 Urutan {index + 1}: <span className="font-semibold">{getSignerDisplayName(signer)}</span>
                                             </p>
                                             <p className="text-xs text-slate-600">
-                                                Tanda tangan visible wajib digunakan. Placeholder {placeholder ? `sudah diatur di page ${placeholder.visiblePage}` : 'belum ditentukan'}.
+                                                {getSignerRoleLabel(signer?.role)}. Tanda tangan visible wajib digunakan. Placeholder {placeholder ? `sudah diatur di page ${placeholder.visiblePage}` : 'belum ditentukan'}.
                                             </p>
                                         </div>
                                         <div className="flex flex-wrap gap-2">

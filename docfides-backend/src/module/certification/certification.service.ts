@@ -32,6 +32,7 @@ import { RequestSignersDto } from './dto/request-signers.dto';
 import { DeclineDocumentDto } from './dto/decline-document.dto';
 import { UpdateSignaturePreferenceDto } from './dto/update-signature-preference.dto';
 import { FinalizeQrDto } from './dto/finalize-qr.dto';
+import { RequestDocumentRevokeDto } from './dto/request-document-revoke.dto';
 import { IpfsService } from './ipfs.service';
 import { BlockchainService } from '../blockchain/blockchain.service';
 
@@ -247,6 +248,66 @@ export class CertificationService {
     };
   }
 
+  async deleteDraftDocument(userId: string, documentId: string) {
+    const document = await this.prisma.document.findUnique({
+      where: { id: documentId },
+      select: {
+        id: true,
+        userId: true,
+        status: true,
+        originalFileName: true,
+        originalFileHash: true,
+        finalFileName: true,
+        finalFileHash: true,
+      },
+    });
+
+    if (!document) {
+      throw new NotFoundException('Dokumen tidak ditemukan');
+    }
+
+    if (document.userId !== userId) {
+      throw new BadRequestException('Hanya pemilik dokumen yang dapat menghapus draft');
+    }
+
+    if (document.status !== 'DRAFT') {
+      throw new BadRequestException('Hanya dokumen draft yang dapat dihapus');
+    }
+
+    let removedFile = false;
+    try {
+      const documentPath = this.resolveDocumentPath(userId, {
+        finalFileName: document.finalFileName,
+        originalFileName: document.originalFileName,
+        finalFileHash: document.finalFileHash,
+        originalFileHash: document.originalFileHash,
+      });
+
+      if (existsSync(documentPath)) {
+        unlinkSync(documentPath);
+        removedFile = true;
+      }
+    } catch (err) {
+      if (!(err instanceof NotFoundException)) {
+        this.logger.warn(
+          `File draft dokumen ${documentId} gagal dihapus: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+
+    await this.prisma.document.delete({
+      where: { id: documentId },
+    });
+
+    return {
+      message: removedFile
+        ? 'Dokumen draft berhasil dihapus'
+        : 'Data dokumen draft berhasil dihapus',
+    };
+  }
+
   async getIpfsStatus() {
     return this.ipfsService.getStatus();
   }
@@ -459,6 +520,11 @@ export class CertificationService {
         status: true,
         order: true,
         updatedAt: true,
+        visiblePage: true,
+        visibleX: true,
+        visibleY: true,
+        visibleWidth: true,
+        visibleHeight: true,
         document: {
           select: {
             id: true,
@@ -481,6 +547,13 @@ export class CertificationService {
         signerStatus: item.status,
         order: item.order,
         updatedAt: item.updatedAt,
+        placeholder: {
+          visiblePage: item.visiblePage,
+          visibleX: item.visibleX,
+          visibleY: item.visibleY,
+          visibleWidth: item.visibleWidth,
+          visibleHeight: item.visibleHeight,
+        },
         document: {
           id: item.document.id,
           status: item.document.status,
@@ -509,6 +582,26 @@ export class CertificationService {
         revokeReason: true,
         createdAt: true,
         updatedAt: true,
+        revokeRequests: {
+          where: { requesterId: userId },
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            reason: true,
+            status: true,
+            reviewNote: true,
+            reviewedAt: true,
+            createdAt: true,
+            evidences: {
+              select: {
+                id: true,
+                originalFileName: true,
+                mimeType: true,
+                sizeBytes: true,
+              },
+            },
+          },
+        },
         user: {
           select: {
             email: true,
@@ -651,6 +744,113 @@ export class CertificationService {
           role: signature.signer.role,
         },
       })),
+      revokeRequests: document.revokeRequests,
+    };
+  }
+
+  async requestDocumentRevoke(
+    userId: string,
+    documentId: string,
+    dto: RequestDocumentRevokeDto,
+    evidenceFiles: Express.Multer.File[],
+  ) {
+    const reason = dto.reason?.trim();
+    if (!reason || reason.length < 10) {
+      throw new BadRequestException('Alasan pencabutan minimal 10 karakter');
+    }
+
+    if (!evidenceFiles || evidenceFiles.length < 2) {
+      throw new BadRequestException('Minimal upload 2 gambar bukti pencabutan');
+    }
+
+    const document = await this.prisma.document.findUnique({
+      where: { id: documentId },
+      select: {
+        id: true,
+        userId: true,
+        status: true,
+        requiredSigners: {
+          select: { userId: true },
+        },
+        signatures: {
+          select: { signerId: true },
+        },
+      },
+    });
+
+    if (!document) {
+      throw new NotFoundException('Dokumen tidak ditemukan');
+    }
+
+    const isOwner = document.userId === userId;
+    const isRequiredSigner = document.requiredSigners.some(
+      (signer) => signer.userId === userId,
+    );
+    const hasSigned = document.signatures.some(
+      (signature) => signature.signerId === userId,
+    );
+
+    if (!isOwner && !isRequiredSigner && !hasSigned) {
+      throw new NotFoundException(
+        'Dokumen tidak ditemukan atau bukan wewenang Anda',
+      );
+    }
+
+    if (document.status !== 'FULLY_SIGNED') {
+      throw new BadRequestException(
+        'Request pencabutan hanya dapat diajukan untuk dokumen final',
+      );
+    }
+
+    const existingPending = await this.prisma.documentRevokeRequest.findFirst({
+      where: {
+        documentId,
+        requesterId: userId,
+        status: 'PENDING',
+      },
+      select: { id: true },
+    });
+
+    if (existingPending) {
+      throw new BadRequestException(
+        'Masih ada request pencabutan yang menunggu review',
+      );
+    }
+
+    const request = await this.prisma.documentRevokeRequest.create({
+      data: {
+        documentId,
+        requesterId: userId,
+        reason,
+        evidences: {
+          create: evidenceFiles.map((file) => ({
+            originalFileName: file.originalname,
+            storedFileName: file.filename,
+            storagePath: file.path,
+            mimeType: file.mimetype,
+            sizeBytes: file.size,
+          })),
+        },
+      },
+      select: {
+        id: true,
+        reason: true,
+        status: true,
+        createdAt: true,
+        evidences: {
+          select: {
+            id: true,
+            originalFileName: true,
+            mimeType: true,
+            sizeBytes: true,
+          },
+        },
+      },
+    });
+
+    return {
+      message: 'Request pencabutan dokumen berhasil diajukan',
+      request,
     };
   }
 
@@ -1133,6 +1333,32 @@ export class CertificationService {
       preferredSignatureMode: 'VISIBLE' as const,
     }));
 
+    // Validate visible signature assets before mutating signer rows. This keeps
+    // a failed "Lanjut" from leaving stale signers in the next step.
+    const visibleSignerIds = requestedSignersWithMode.map(
+      (item) => item.userId,
+    );
+
+    const missingSignatureImages = visibleSignerIds.filter(
+      (signerUserId) => !this.resolveSignatureImagePath(signerUserId),
+    );
+
+    if (missingSignatureImages.length > 0) {
+      const missingSignerNames = missingSignatureImages.map((signerUserId) => {
+        const signer = userById.get(signerUserId);
+        return (
+          signer?.identity?.fullName ??
+          signer?.displayName ??
+          signer?.email ??
+          'Signer'
+        );
+      });
+
+      throw new BadRequestException(
+        `Tanda tangan belum tersedia untuk: ${missingSignerNames.join(', ')}. Minta signer tersebut membuka menu Tanda Tangan dan menyimpan tanda tangannya terlebih dahulu.`,
+      );
+    }
+
     const result = await this.prisma.$transaction(async (tx) => {
       const processed = [] as Array<{
         userId: string;
@@ -1141,6 +1367,37 @@ export class CertificationService {
         action: 'invited' | 're-requested' | 'already-exists' | 'updated';
         placeholder: SignerPlaceholderConfig;
       }>;
+
+      const omittedExistingSigners = await tx.documentSigner.findMany({
+        where: {
+          documentId,
+          userId: { notIn: signerIds },
+        },
+        select: {
+          id: true,
+          status: true,
+        },
+      });
+
+      const signedOmittedSigner = omittedExistingSigners.find(
+        (signer) => signer.status === 'SIGNED',
+      );
+      if (signedOmittedSigner) {
+        throw new BadRequestException(
+          'Signer yang sudah menandatangani tidak dapat dihapus dari daftar penandatangan.',
+        );
+      }
+
+      const removableSignerIds = omittedExistingSigners
+        .map((signer) => signer.id);
+
+      if (removableSignerIds.length > 0) {
+        await tx.documentSigner.deleteMany({
+          where: {
+            id: { in: removableSignerIds },
+          },
+        });
+      }
 
       for (const [index, signerUserId] of signerIds.entries()) {
         const existingSigner = existingByUserId.get(signerUserId);
@@ -1271,30 +1528,6 @@ export class CertificationService {
     });
 
     // Pre-render all visible signature appearances to prevent breaking incremental signing
-    const visibleSignerIds = requestedSignersWithMode.map(
-      (item) => item.userId,
-    );
-
-    const missingSignatureImages = visibleSignerIds.filter(
-      (signerUserId) => !this.resolveSignatureImagePath(signerUserId),
-    );
-
-    if (missingSignatureImages.length > 0) {
-      const missingSignerNames = missingSignatureImages.map((signerUserId) => {
-        const signer = userById.get(signerUserId);
-        return (
-          signer?.identity?.fullName ??
-          signer?.displayName ??
-          signer?.email ??
-          'Signer'
-        );
-      });
-
-      throw new BadRequestException(
-        `Tanda tangan belum tersedia untuk: ${missingSignerNames.join(', ')}. Minta signer tersebut membuka menu Tanda Tangan dan menyimpan tanda tangannya terlebih dahulu.`,
-      );
-    }
-
     const sourceDocumentPath = this.resolveDocumentPath(
       document.userId ?? requesterUserId,
       {

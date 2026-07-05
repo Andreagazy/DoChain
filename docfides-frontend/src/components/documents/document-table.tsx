@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { ArrowRight, ArrowUpDown, Download, Eye, FileText } from 'lucide-react';
+import { ArrowRight, ArrowUpDown, Download, Eye, FileText, Loader2, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { OwnedDocumentItem } from '@/types/auth';
@@ -13,6 +13,8 @@ interface DocumentTableProps {
     onSortChange: (nextSortBy: 'name' | 'updatedAt' | 'status') => void;
     onDownloadOriginal: (doc: OwnedDocumentItem) => void;
     onDownloadIpfs: (doc: OwnedDocumentItem) => void;
+    onDeleteDraft: (doc: OwnedDocumentItem) => void;
+    deletingDocumentId?: string;
 }
 
 export function DocumentTable({
@@ -22,6 +24,8 @@ export function DocumentTable({
     onSortChange,
     onDownloadOriginal,
     onDownloadIpfs,
+    onDeleteDraft,
+    deletingDocumentId = '',
 }: DocumentTableProps) {
     const getActionHref = (doc: OwnedDocumentItem) => {
         if (doc.accessType === 'SIGNER') {
@@ -60,7 +64,7 @@ export function DocumentTable({
                         </thead>
                         <tbody className="divide-y divide-slate-100/60">
                             {documents.map((doc) => (
-                                <tr key={doc.id} className="group hover:bg-slate-50/50 transition-all duration-200">
+                                <tr key={doc.id} className="group transition-all duration-200 hover:bg-slate-50/50">
                                     <td className="px-6 py-4.5">
                                         <div className="flex items-center gap-3">
                                             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-50/50 text-indigo-500 border border-indigo-100/30 group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
@@ -111,6 +115,23 @@ export function DocumentTable({
                                                     title="Unduh file final dari IPFS. Jika IPFS tidak tersedia, sistem memakai fallback backend."
                                                 >
                                                     <Download className="h-3.5 w-3.5" /> Final IPFS
+                                                </Button>
+                                            ) : null}
+                                            {doc.accessType === 'OWNER' && doc.status === 'DRAFT' ? (
+                                                <Button
+                                                    variant="outline"
+                                                    className="h-8 rounded-lg border-red-200/80 text-xs font-semibold text-red-700 shadow-xs transition-all hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+                                                    size="sm"
+                                                    onClick={() => onDeleteDraft(doc)}
+                                                    disabled={deletingDocumentId === doc.id}
+                                                    title="Hapus dokumen draft"
+                                                >
+                                                    {deletingDocumentId === doc.id ? (
+                                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                    ) : (
+                                                        <Trash2 className="h-3.5 w-3.5" />
+                                                    )}
+                                                    Hapus
                                                 </Button>
                                             ) : null}
                                             <Link

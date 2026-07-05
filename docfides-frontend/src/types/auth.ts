@@ -381,12 +381,33 @@ export interface CertificationDocumentDetailResponse {
       role: UserRole;
     };
   }>;
+  revokeRequests: Array<{
+    id: string;
+    reason: string;
+    status: 'PENDING' | 'APPROVED' | 'REJECTED';
+    reviewNote: string | null;
+    reviewedAt: string | null;
+    createdAt: string;
+    evidences: Array<{
+      id: string;
+      originalFileName: string;
+      mimeType: string;
+      sizeBytes: number;
+    }>;
+  }>;
 }
 
 export interface AssignedDocumentItem {
   signerStatus: string;
   order: number | null;
   updatedAt: string;
+  placeholder: {
+    visiblePage: number | null;
+    visibleX: number | null;
+    visibleY: number | null;
+    visibleWidth: number | null;
+    visibleHeight: number | null;
+  };
   document: {
     id: string;
     status: string;
@@ -785,4 +806,71 @@ export interface RevokeAdminDocumentPayload {
 export interface RevokeAdminDocumentResponse {
   message: string;
   document: AdminDocumentsResponse['documents'][number];
+}
+
+export interface RequestDocumentRevokeResponse {
+  message: string;
+  request: {
+    id: string;
+    reason: string;
+    status: 'PENDING' | 'APPROVED' | 'REJECTED';
+    createdAt: string;
+    evidences: Array<{
+      id: string;
+      originalFileName: string;
+      mimeType: string;
+      sizeBytes: number;
+    }>;
+  };
+}
+
+export interface AdminDocumentRevokeRequestItem {
+  id: string;
+  reason: string;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  reviewNote: string | null;
+  reviewedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  requester: {
+    email: string;
+    displayName: string | null;
+    role: UserRole;
+    identity: { fullName: string | null } | null;
+  };
+  reviewedBy: {
+    email: string;
+    displayName: string | null;
+    role: UserRole;
+  } | null;
+  document: {
+    id: string;
+    originalFileName: string | null;
+    finalFileName: string | null;
+    status: string;
+    finalFileHash: string | null;
+    finalFileIpfsHash: string | null;
+    updatedAt: string;
+    user: {
+      email: string;
+      displayName: string | null;
+      identity: { fullName: string | null } | null;
+    } | null;
+  };
+  evidences: Array<{
+    id: string;
+    originalFileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    createdAt: string;
+  }>;
+}
+
+export interface AdminDocumentRevokeRequestsResponse {
+  requests: AdminDocumentRevokeRequestItem[];
+}
+
+export interface ReviewDocumentRevokeRequestPayload {
+  status: 'APPROVED' | 'REJECTED';
+  reviewNote?: string;
 }

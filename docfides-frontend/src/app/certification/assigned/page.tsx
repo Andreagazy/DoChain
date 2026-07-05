@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { CheckCircle2, Clock3, Eye, FileText, Inbox, Loader2, PenLine, ShieldCheck, XCircle } from 'lucide-react';
 import {
@@ -44,7 +44,15 @@ type SignDialogState = {
     documentId: string;
     title: string;
     owner: string;
+    placeholder: AssignedDocumentItem['placeholder'];
 } | null;
+
+type RenderedPageSize = {
+    pdfWidth: number;
+    pdfHeight: number;
+    viewWidth: number;
+    viewHeight: number;
+};
 
 const ASSIGNMENTS_PER_PAGE = 5;
 const INACTIVE_DOCUMENT_STATUSES = ['REVOKED', 'REJECTED'];
@@ -86,7 +94,6 @@ export default function CertificationAssignedDocumentsPage() {
     const [loadingAction, setLoadingAction] = useState('');
     const [error, setError] = useState('');
     const [success, setSuccess] = useState('');
-    const [preferredMode, setPreferredMode] = useState<'visible' | 'invisible'>('visible');
     const [hasSignature, setHasSignature] = useState(false);
     const [assignments, setAssignments] = useState<AssignedDocumentItem[]>([]);
     const [previewState, setPreviewState] = useState<DocumentPreviewState | null>(null);
@@ -98,8 +105,16 @@ export default function CertificationAssignedDocumentsPage() {
     const [currentPage, setCurrentPage] = useState(1);
     const [declineDialog, setDeclineDialog] = useState<DeclineDialogState>(null);
     const [signDialog, setSignDialog] = useState<SignDialogState>(null);
+    const [signPreviewLoading, setSignPreviewLoading] = useState(false);
+    const [signPreviewError, setSignPreviewError] = useState('');
+    const [signPreviewPdfDocument, setSignPreviewPdfDocument] = useState<PdfDocumentProxy | null>(null);
+    const [signPreviewPage, setSignPreviewPage] = useState(1);
+    const [signPreviewPageCount, setSignPreviewPageCount] = useState(0);
+    const [signRenderedPageSize, setSignRenderedPageSize] = useState<RenderedPageSize | null>(null);
+    const [signPlacementConfirmed, setSignPlacementConfirmed] = useState(false);
     const [declineReason, setDeclineReason] = useState('');
     const previewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+    const signPreviewCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
     const pendingAssignments = useMemo(
         () => assignments.filter(isAssignmentActionable),
@@ -157,7 +172,6 @@ export default function CertificationAssignedDocumentsPage() {
                     return;
                 }
 
-                setPreferredMode('visible');
                 setHasSignature(signatureStatus.hasSignature);
                 setAssignments(assignmentResponse.assignments);
             } catch (err) {
@@ -258,6 +272,99 @@ export default function CertificationAssignedDocumentsPage() {
     }, [previewPdfDocument, previewPage]);
 
     useEffect(() => {
+        let objectUrl = '';
+
+        async function loadSignPreview() {
+            setSignPreviewError('');
+            setSignPreviewLoading(true);
+            setSignPreviewPdfDocument(null);
+            setSignRenderedPageSize(null);
+            setSignPlacementConfirmed(false);
+
+            if (!signDialog?.documentId) {
+                setSignPreviewLoading(false);
+                return;
+            }
+
+            try {
+                const blob = await getCertificationDocumentOriginalFile(signDialog.documentId);
+                objectUrl = URL.createObjectURL(blob);
+                const pdfjs = await loadPdfJsModule();
+                const pdfData = new Uint8Array(await blob.arrayBuffer());
+                const loadingTask = pdfjs.getDocument({ data: pdfData });
+                const pdfDocument = await loadingTask.promise;
+                setSignPreviewPdfDocument(pdfDocument);
+                setSignPreviewPageCount(pdfDocument.numPages);
+                setSignPreviewPage(signDialog.placeholder.visiblePage ?? 1);
+            } catch (err) {
+                setSignPreviewError(normalizeErrorMessage(err));
+                setSignPreviewPdfDocument(null);
+                setSignPreviewPageCount(0);
+            } finally {
+                setSignPreviewLoading(false);
+            }
+        }
+
+        void loadSignPreview();
+
+        return () => {
+            if (objectUrl) {
+                URL.revokeObjectURL(objectUrl);
+            }
+        };
+    }, [signDialog?.documentId, signDialog?.placeholder.visiblePage]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        async function renderSignPreviewPage() {
+            if (!signPreviewPdfDocument) {
+                return;
+            }
+
+            try {
+                const page = await signPreviewPdfDocument.getPage(signPreviewPage);
+                if (cancelled) return;
+
+                const viewport = page.getViewport({ scale: 1.35 });
+                const canvas = signPreviewCanvasRef.current;
+                const context = canvas?.getContext('2d');
+
+                if (!canvas || !context) {
+                    return;
+                }
+
+                canvas.width = Math.floor(viewport.width);
+                canvas.height = Math.floor(viewport.height);
+                canvas.style.width = `${viewport.width}px`;
+                canvas.style.height = `${viewport.height}px`;
+                setSignRenderedPageSize({
+                    pdfWidth: page.view[2] - page.view[0],
+                    pdfHeight: page.view[3] - page.view[1],
+                    viewWidth: viewport.width,
+                    viewHeight: viewport.height,
+                });
+
+                await page.render({
+                    canvasContext: context,
+                    canvas,
+                    viewport,
+                }).promise;
+            } catch (err) {
+                if (!cancelled) {
+                    setSignPreviewError(normalizeErrorMessage(err));
+                }
+            }
+        }
+
+        void renderSignPreviewPage();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [signPreviewPdfDocument, signPreviewPage]);
+
+    useEffect(() => {
         setCurrentPage((page) => Math.min(page, totalPages));
     }, [totalPages]);
 
@@ -296,7 +403,75 @@ export default function CertificationAssignedDocumentsPage() {
             documentId: assignment.document.id,
             title: getAssignmentTitle(assignment),
             owner: assignment.document.ownerDisplayName ?? assignment.document.ownerEmail ?? '-',
+            placeholder: assignment.placeholder,
         });
+    };
+
+    const signPlaceholderOverlay = useMemo(() => {
+        if (!signDialog || !signRenderedPageSize) {
+            return null;
+        }
+
+        const { placeholder } = signDialog;
+        if (
+            placeholder.visiblePage !== signPreviewPage ||
+            placeholder.visibleX == null ||
+            placeholder.visibleY == null ||
+            placeholder.visibleWidth == null ||
+            placeholder.visibleHeight == null
+        ) {
+            return null;
+        }
+
+        const scaleX = signRenderedPageSize.viewWidth / signRenderedPageSize.pdfWidth;
+        const scaleY = signRenderedPageSize.viewHeight / signRenderedPageSize.pdfHeight;
+
+        return {
+            left: placeholder.visibleX * scaleX,
+            top: (signRenderedPageSize.pdfHeight - (placeholder.visibleY + placeholder.visibleHeight)) * scaleY,
+            width: placeholder.visibleWidth * scaleX,
+            height: placeholder.visibleHeight * scaleY,
+        };
+    }, [signDialog, signPreviewPage, signRenderedPageSize]);
+
+    const handleSignPreviewClick = (event: MouseEvent<HTMLDivElement>) => {
+        if (!signDialog || !signRenderedPageSize || !signPreviewCanvasRef.current) {
+            return;
+        }
+
+        const { placeholder } = signDialog;
+        if (
+            placeholder.visiblePage !== signPreviewPage ||
+            placeholder.visibleX == null ||
+            placeholder.visibleY == null ||
+            placeholder.visibleWidth == null ||
+            placeholder.visibleHeight == null
+        ) {
+            setSignPreviewError('Posisi tanda tangan untuk signer ini belum tersedia pada halaman ini.');
+            return;
+        }
+
+        const rect = signPreviewCanvasRef.current.getBoundingClientRect();
+        const clickX = event.clientX - rect.left;
+        const clickY = event.clientY - rect.top;
+        const scaleX = signRenderedPageSize.viewWidth / signRenderedPageSize.pdfWidth;
+        const scaleY = signRenderedPageSize.viewHeight / signRenderedPageSize.pdfHeight;
+        const pdfX = clickX / scaleX;
+        const pdfY = signRenderedPageSize.pdfHeight - clickY / scaleY;
+        const isInsidePlaceholder =
+            pdfX >= placeholder.visibleX &&
+            pdfX <= placeholder.visibleX + placeholder.visibleWidth &&
+            pdfY >= placeholder.visibleY &&
+            pdfY <= placeholder.visibleY + placeholder.visibleHeight;
+
+        if (!isInsidePlaceholder) {
+            setSignPlacementConfirmed(false);
+            setSignPreviewError('Klik tepat pada area tanda tangan yang ditandai untuk melanjutkan.');
+            return;
+        }
+
+        setSignPreviewError('');
+        setSignPlacementConfirmed(true);
     };
 
     const handleAssignedSign = async (documentId: string) => {
@@ -304,8 +479,15 @@ export default function CertificationAssignedDocumentsPage() {
             await signDocumentCertification(documentId, {
                 mode: 'visible',
                 reason: 'DOCChain digital signature',
+                visiblePage: signDialog?.placeholder.visiblePage ?? undefined,
+                visibleX: signDialog?.placeholder.visibleX ?? undefined,
+                visibleY: signDialog?.placeholder.visibleY ?? undefined,
+                visibleWidth: signDialog?.placeholder.visibleWidth ?? undefined,
+                visibleHeight: signDialog?.placeholder.visibleHeight ?? undefined,
             });
             setSignDialog(null);
+            setSignPreviewPdfDocument(null);
+            setSignPlacementConfirmed(false);
             await refreshAssignments();
         });
     };
@@ -667,26 +849,98 @@ export default function CertificationAssignedDocumentsPage() {
             </Dialog>
 
             <Dialog open={Boolean(signDialog)} onOpenChange={(open) => !open && setSignDialog(null)}>
-                <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
+                <DialogContent className="w-[min(96vw,980px)] max-w-none">
                     <DialogHeader>
-                        <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-blue-50 text-blue-700">
-                            <PenLine className="h-5 w-5" />
-                        </div>
                         <DialogTitle>Konfirmasi Tanda Tangan</DialogTitle>
                         <DialogDescription>
-                            Tinjau dokumen terlebih dahulu. Setelah dikonfirmasi, tanda tangan digital Anda akan diterapkan dan aksi ini tidak bisa dibatalkan dari sisi signer.
+                            Tinjau dokumen, klik area tanda tangan yang ditandai, lalu konfirmasi untuk menerapkan tanda tangan digital.
                         </DialogDescription>
                     </DialogHeader>
 
-                    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-                        <div>
-                            <p className="text-xs font-semibold uppercase text-slate-500">Dokumen</p>
-                            <p className="mt-1 font-semibold text-slate-900">{signDialog?.title ?? '-'}</p>
+                    <div className="space-y-3">
+                        <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <p className="font-semibold text-slate-900">{signDialog?.title ?? '-'}</p>
+                                <p className="text-xs text-slate-600">Pemilik: {signDialog?.owner ?? '-'}</p>
+                            </div>
+                            <Badge variant={signPlacementConfirmed ? 'success' : 'warning'}>
+                                {signPlacementConfirmed ? 'Posisi dikonfirmasi' : 'Klik area tanda tangan'}
+                            </Badge>
                         </div>
-                        <div>
-                            <p className="text-xs font-semibold uppercase text-slate-500">Pemilik</p>
-                            <p className="mt-1 text-slate-800">{signDialog?.owner ?? '-'}</p>
-                        </div>
+
+                        {signPreviewLoading ? (
+                            <div className="flex min-h-96 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 text-slate-600">
+                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                Memuat preview dokumen...
+                            </div>
+                        ) : signPreviewPdfDocument ? (
+                            <div className="space-y-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                                    <p className="text-sm font-semibold text-slate-700">
+                                        Halaman {signPreviewPage} dari {signPreviewPageCount}
+                                    </p>
+                                    <div className="flex items-center gap-2">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            className="h-8 border-slate-300 px-3 text-xs"
+                                            onClick={() => {
+                                                setSignPlacementConfirmed(false);
+                                                setSignPreviewPage((page) => Math.max(1, page - 1));
+                                            }}
+                                            disabled={signPreviewPage <= 1}
+                                        >
+                                            Sebelumnya
+                                        </Button>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            className="h-8 border-slate-300 px-3 text-xs"
+                                            onClick={() => {
+                                                setSignPlacementConfirmed(false);
+                                                setSignPreviewPage((page) => Math.min(signPreviewPageCount, page + 1));
+                                            }}
+                                            disabled={signPreviewPage >= signPreviewPageCount}
+                                        >
+                                            Berikutnya
+                                        </Button>
+                                    </div>
+                                </div>
+
+                                {signPreviewError ? (
+                                    <Alert className="border-amber-200 bg-amber-50 text-amber-800">
+                                        <AlertDescription>{signPreviewError}</AlertDescription>
+                                    </Alert>
+                                ) : null}
+
+                                <div className="max-h-[62vh] overflow-auto rounded-2xl border border-slate-200 bg-slate-100 p-4">
+                                    <div className="relative mx-auto w-fit" onClick={handleSignPreviewClick}>
+                                        <canvas ref={signPreviewCanvasRef} className="block rounded-md bg-white shadow-sm" />
+                                        {signPlaceholderOverlay ? (
+                                            <div
+                                                className={`pointer-events-none absolute flex items-center justify-center rounded-md border-2 text-[11px] font-bold ${
+                                                    signPlacementConfirmed
+                                                        ? 'border-emerald-500 bg-emerald-500/15 text-emerald-800'
+                                                        : 'border-blue-500 bg-blue-500/15 text-blue-800'
+                                                }`}
+                                                style={{
+                                                    left: signPlaceholderOverlay.left,
+                                                    top: signPlaceholderOverlay.top,
+                                                    width: signPlaceholderOverlay.width,
+                                                    height: signPlaceholderOverlay.height,
+                                                }}
+                                            >
+                                                Area tanda tangan
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                                Gagal memuat preview dokumen{signPreviewError ? `: ${signPreviewError}` : '.'}
+                            </div>
+                        )}
                     </div>
 
                     <div className="flex flex-wrap justify-end gap-2">
@@ -696,7 +950,7 @@ export default function CertificationAssignedDocumentsPage() {
                         <Button
                             className="bg-blue-600 text-white hover:bg-blue-700"
                             onClick={() => signDialog && void handleAssignedSign(signDialog.documentId)}
-                            disabled={loadingAction !== '' || !signDialog}
+                            disabled={loadingAction !== '' || !signDialog || !signPlacementConfirmed}
                         >
                             {loadingAction === 'Sign Dokumen' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PenLine className="mr-2 h-4 w-4" />}
                             Ya, Tanda Tangani

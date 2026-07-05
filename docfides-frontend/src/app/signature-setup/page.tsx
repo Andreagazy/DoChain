@@ -3,8 +3,7 @@
 import { Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Image from 'next/image';
-import { AxiosError } from 'axios';
-import { AlertCircle, CheckCircle2, Eye, EyeOff, Loader2, PenLine, RotateCcw, Save, UploadCloud } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Loader2, PenLine, RotateCcw, Save, UploadCloud } from 'lucide-react';
 import { AppShell } from '@/components/layout/app-shell';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -12,10 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { getIdentityStatus, getSignatureImageFile, getSignatureStatus, updateSignaturePreference, uploadSignatureImage } from '@/lib/auth-service';
-
-type ApiError = {
-    message?: string | string[];
-};
+import { normalizeErrorMessage } from '@/lib/certification-flow';
 
 type CropRect = {
     x: number;
@@ -29,14 +25,14 @@ type CropInteraction = 'move' | 'resize' | null;
 const SIGNATURE_PLACEHOLDER_ASPECT_RATIO = 160 / 70;
 const SIGNATURE_CROP_SCALE = 0.7;
 const MIN_CROP_WIDTH = Math.ceil(SIGNATURE_PLACEHOLDER_ASPECT_RATIO);
+const MAX_SIGNATURE_FILE_SIZE = 2 * 1024 * 1024;
+const allowedSignatureMimeTypes = ['image/jpeg', 'image/png'];
+const allowedSignatureExtensions = ['jpg', 'jpeg', 'png'];
 
-function normalizeErrorMessage(err: unknown): string {
-    const axiosError = err as AxiosError<ApiError>;
-    const message = axiosError.response?.data?.message;
-    return Array.isArray(message)
-        ? message.join(', ')
-        : message ?? axiosError.message ?? 'Terjadi kesalahan';
-}
+const isValidSignatureFile = (file: File) => {
+    const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
+    return allowedSignatureMimeTypes.includes(file.type) && allowedSignatureExtensions.includes(extension);
+};
 
 function SignatureSetupContent() {
     const router = useRouter();
@@ -45,7 +41,6 @@ function SignatureSetupContent() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [identityApproved, setIdentityApproved] = useState(false);
-    const [mode, setMode] = useState<'invisible' | 'visible'>('visible');
     const [signatureFile, setSignatureFile] = useState<File | null>(null);
     const [signaturePreviewUrl, setSignaturePreviewUrl] = useState('');
     const [storedSignaturePreviewUrl, setStoredSignaturePreviewUrl] = useState('');
@@ -55,6 +50,7 @@ function SignatureSetupContent() {
     const [cropInteraction, setCropInteraction] = useState<CropInteraction>(null);
     const [hasSignature, setHasSignature] = useState(false);
     const [error, setError] = useState('');
+    const [signatureError, setSignatureError] = useState('');
     const [success, setSuccess] = useState('');
 
     const previewContainerRef = useRef<HTMLDivElement | null>(null);
@@ -91,7 +87,6 @@ function SignatureSetupContent() {
 
                 setIdentityApproved(identityStatus.status === 'APPROVED');
                 setHasSignature(signatureStatus.hasSignature);
-                setMode(signatureStatus.preferredSignatureMode);
 
                 if (signatureStatus.hasSignature) {
                     try {
@@ -459,15 +454,26 @@ function SignatureSetupContent() {
 
     const handleSave = async () => {
         setError('');
+        setSignatureError('');
         setSuccess('');
 
         if (!identityApproved) {
-            setError('Identitas harus APPROVED sebelum setup tanda tangan.');
+            setSignatureError('Identitas KTP harus terverifikasi sebelum Anda dapat mengatur tanda tangan.');
             return;
         }
 
         if (!hasSignature && !signatureFile) {
-            setError('Upload gambar tanda tangan terlebih dahulu.');
+            setSignatureError('Upload gambar tanda tangan terlebih dahulu. Format yang diperbolehkan adalah JPG, JPEG, atau PNG.');
+            return;
+        }
+
+        if (signatureFile && !isValidSignatureFile(signatureFile)) {
+            setSignatureError('Format file tanda tangan tidak sesuai. Pilih file gambar JPG, JPEG, atau PNG.');
+            return;
+        }
+
+        if (signatureFile && signatureFile.size > MAX_SIGNATURE_FILE_SIZE) {
+            setSignatureError('Ukuran file tanda tangan maksimal 2MB.');
             return;
         }
 
@@ -486,7 +492,7 @@ function SignatureSetupContent() {
             setSuccess('Setup tanda tangan berhasil disimpan.');
             router.push(nextPath);
         } catch (err) {
-            setError(normalizeErrorMessage(err));
+            setSignatureError(normalizeErrorMessage(err));
         } finally {
             setSaving(false);
         }
@@ -552,6 +558,13 @@ function SignatureSetupContent() {
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
+                        {signatureError && (
+                            <Alert className="border-red-200 bg-red-50 text-red-800">
+                                <AlertCircle className="h-4 w-4" />
+                                <AlertDescription>{signatureError}</AlertDescription>
+                            </Alert>
+                        )}
+
                         <div className="rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-800">
                             Mode aktif: <span className="font-bold">Visible Signature</span>. Tanda tangan akan terlihat pada area placeholder dokumen.
                         </div>
@@ -564,7 +577,32 @@ function SignatureSetupContent() {
                                 <Input
                                     type="file"
                                     accept="image/png,image/jpeg,image/jpg"
-                                    onChange={(event) => setSignatureFile(event.target.files?.[0] ?? null)}
+                                    onChange={(event) => {
+                                        const file = event.target.files?.[0] ?? null;
+                                        setSuccess('');
+
+                                        if (!file) {
+                                            setSignatureFile(null);
+                                            return;
+                                        }
+
+                                        if (!isValidSignatureFile(file)) {
+                                            setSignatureError('Format file tanda tangan tidak sesuai. Pilih file gambar JPG, JPEG, atau PNG.');
+                                            event.target.value = '';
+                                            setSignatureFile(null);
+                                            return;
+                                        }
+
+                                        if (file.size > MAX_SIGNATURE_FILE_SIZE) {
+                                            setSignatureError('Ukuran file tanda tangan maksimal 2MB.');
+                                            event.target.value = '';
+                                            setSignatureFile(null);
+                                            return;
+                                        }
+
+                                        setSignatureError('');
+                                        setSignatureFile(file);
+                                    }}
                                 />
                                 {hasSignature && !signatureFile && (
                                     <p className="text-xs text-emerald-700">Tanda tangan tersimpan sudah ada, Anda bisa langsung lanjut.</p>

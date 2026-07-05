@@ -53,25 +53,31 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Email belum terdaftar di DOCChain');
     }
 
     const passwordValid = await bcrypt.compare(password, user.passwordHash);
 
     if (!passwordValid) {
-      throw new UnauthorizedException('Invalid credentials');
+      throw new UnauthorizedException('Password yang Anda masukkan tidak sesuai');
     }
 
     if (user.deletedAt) {
-      throw new UnauthorizedException('Account deleted');
+      throw new UnauthorizedException(
+        'Akun ini sudah dinonaktifkan. Silakan hubungi admin',
+      );
     }
 
     if (user.status !== 'ACTIVE') {
-      throw new UnauthorizedException('Account not active');
+      throw new UnauthorizedException(
+        'Akun belum aktif. Silakan hubungi admin prodi atau superadmin',
+      );
     }
 
     if (!user.emailVerifiedAt) {
-      throw new UnauthorizedException('Email not verified');
+      throw new UnauthorizedException(
+        'Email akun belum diverifikasi. Silakan hubungi admin',
+      );
     }
 
     return user;

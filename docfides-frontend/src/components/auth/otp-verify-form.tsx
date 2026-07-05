@@ -14,14 +14,9 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import {
     Loader2,
     AlertCircle,
-    Lock,
 } from 'lucide-react';
 import { verifyOtp } from '@/lib/auth-service';
-import { AxiosError } from 'axios';
-
-type ApiError = {
-    message?: string | string[];
-};
+import { normalizeErrorMessage } from '@/lib/certification-flow';
 
 interface OtpVerifyFormProps {
     email: string;
@@ -84,12 +79,7 @@ export default function OtpVerifyForm({
             // Success - pass OTP code to callback
             onOtpVerified();
         } catch (err: unknown) {
-            const error = err as AxiosError<ApiError>;
-            const responseMessage = error.response?.data?.message;
-            const normalizedMessage = Array.isArray(responseMessage)
-                ? responseMessage.join(', ')
-                : responseMessage;
-            const errorMessage = normalizedMessage ?? error.message ?? 'Verifikasi gagal. Silakan coba lagi.';
+            const errorMessage = normalizeErrorMessage(err);
             setError(errorMessage);
 
             // Extract remaining attempts

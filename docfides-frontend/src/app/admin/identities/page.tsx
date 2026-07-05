@@ -72,6 +72,8 @@ export default function AdminIdentitiesPage() {
     const [ktpDialog, setKtpDialog] = useState<KtpDialogState>(null);
     const [changeRequestKtpDialog, setChangeRequestKtpDialog] = useState<ChangeRequestKtpDialogState>(null);
     const [error, setError] = useState('');
+    const [reviewError, setReviewError] = useState('');
+    const [changeRequestReviewError, setChangeRequestReviewError] = useState('');
     const [success, setSuccess] = useState('');
 
     const filteredIdentities = useMemo(() => {
@@ -134,6 +136,8 @@ export default function AdminIdentitiesPage() {
 
     const openReviewDialog = (identity: AdminIdentity, status: 'APPROVED' | 'REJECTED') => {
         setRejectReason('');
+        setReviewError('');
+        setError('');
         setReviewDialog({ identity, status });
     };
 
@@ -158,7 +162,14 @@ export default function AdminIdentitiesPage() {
 
         const { identity, status } = reviewDialog;
         setError('');
+        setReviewError('');
         setSuccess('');
+
+        if (status === 'REJECTED' && rejectReason.trim().length < 5) {
+            setReviewError('Alasan penolakan wajib diisi minimal 5 karakter agar user memahami data yang perlu diperbaiki.');
+            return;
+        }
+
         setReviewingUserId(identity.userId);
         try {
             const result = await reviewAdminIdentity(identity.userId, {
@@ -172,7 +183,7 @@ export default function AdminIdentitiesPage() {
             setRejectReason('');
             await refreshData();
         } catch (err) {
-            setError(normalizeErrorMessage(err));
+            setReviewError(normalizeErrorMessage(err));
         } finally {
             setReviewingUserId('');
         }
@@ -180,6 +191,8 @@ export default function AdminIdentitiesPage() {
 
     const openChangeRequestReviewDialog = (request: IdentityChangeRequestItem, status: 'APPROVED' | 'REJECTED') => {
         setRejectReason('');
+        setChangeRequestReviewError('');
+        setError('');
         setChangeRequestReviewDialog({ request, status });
     };
 
@@ -190,7 +203,14 @@ export default function AdminIdentitiesPage() {
 
         const { request, status } = changeRequestReviewDialog;
         setError('');
+        setChangeRequestReviewError('');
         setSuccess('');
+
+        if (status === 'REJECTED' && rejectReason.trim().length < 5) {
+            setChangeRequestReviewError('Alasan penolakan wajib diisi minimal 5 karakter agar user memahami perubahan identitas yang perlu diperbaiki.');
+            return;
+        }
+
         setReviewingRequestId(request.id);
         try {
             const result = await reviewIdentityChangeRequest(request.id, {
@@ -204,7 +224,7 @@ export default function AdminIdentitiesPage() {
             setRejectReason('');
             await refreshData();
         } catch (err) {
-            setError(normalizeErrorMessage(err));
+            setChangeRequestReviewError(normalizeErrorMessage(err));
         } finally {
             setReviewingRequestId('');
         }
@@ -596,7 +616,12 @@ export default function AdminIdentitiesPage() {
                     </DialogContent>
                 </Dialog>
 
-                <Dialog open={Boolean(reviewDialog)} onOpenChange={(open) => !open && setReviewDialog(null)}>
+                <Dialog open={Boolean(reviewDialog)} onOpenChange={(open) => {
+                    if (!open) {
+                        setReviewDialog(null);
+                        setReviewError('');
+                    }
+                }}>
                     <DialogContent className="w-[min(92vw,560px)] rounded-2xl">
                         <DialogHeader>
                             <DialogTitle>
@@ -615,15 +640,27 @@ export default function AdminIdentitiesPage() {
                             <p className="mt-1 text-xs text-slate-500">{reviewDialog?.identity.user.email ?? '-'}</p>
                         </div>
 
+                        {reviewError ? (
+                            <Alert className="border-red-200 bg-red-50 text-red-800">
+                                <AlertCircle className="h-4 w-4" />
+                                <AlertDescription>{reviewError}</AlertDescription>
+                            </Alert>
+                        ) : null}
+
                         {reviewDialog?.status === 'REJECTED' ? (
                             <div className="space-y-1.5">
                                 <label className="text-xs font-medium text-slate-600">Alasan penolakan</label>
                                 <textarea
                                     value={rejectReason}
-                                    onChange={(event) => setRejectReason(event.target.value)}
+                                    onChange={(event) => {
+                                        setReviewError('');
+                                        setRejectReason(event.target.value);
+                                    }}
                                     placeholder="Contoh: Foto KTP kurang jelas atau NIK tidak sesuai."
                                     className="min-h-28 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                                    maxLength={500}
                                 />
+                                <p className="text-xs text-slate-500">Minimal 5 karakter, maksimal 500 karakter.</p>
                             </div>
                         ) : null}
 
@@ -634,7 +671,7 @@ export default function AdminIdentitiesPage() {
                             <Button
                                 variant={reviewDialog?.status === 'REJECTED' ? 'destructive' : 'default'}
                                 onClick={() => void handleReview()}
-                                disabled={Boolean(reviewDialog && reviewingUserId === reviewDialog.identity.userId) || (reviewDialog?.status === 'REJECTED' && rejectReason.trim().length < 5)}
+                                disabled={Boolean(reviewDialog && reviewingUserId === reviewDialog.identity.userId)}
                             >
                                 {reviewDialog && reviewingUserId === reviewDialog.identity.userId ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                                 Ya, {reviewDialog?.status === 'APPROVED' ? 'Approve' : 'Reject'}
@@ -643,7 +680,12 @@ export default function AdminIdentitiesPage() {
                     </DialogContent>
                 </Dialog>
 
-                <Dialog open={Boolean(changeRequestReviewDialog)} onOpenChange={(open) => !open && setChangeRequestReviewDialog(null)}>
+                <Dialog open={Boolean(changeRequestReviewDialog)} onOpenChange={(open) => {
+                    if (!open) {
+                        setChangeRequestReviewDialog(null);
+                        setChangeRequestReviewError('');
+                    }
+                }}>
                     <DialogContent className="w-[min(92vw,560px)] rounded-2xl">
                         <DialogHeader>
                             <DialogTitle>
@@ -671,15 +713,27 @@ export default function AdminIdentitiesPage() {
                             </div>
                         </div>
 
+                        {changeRequestReviewError ? (
+                            <Alert className="border-red-200 bg-red-50 text-red-800">
+                                <AlertCircle className="h-4 w-4" />
+                                <AlertDescription>{changeRequestReviewError}</AlertDescription>
+                            </Alert>
+                        ) : null}
+
                         {changeRequestReviewDialog?.status === 'REJECTED' ? (
                             <div className="space-y-1.5">
                                 <label className="text-xs font-medium text-slate-600">Alasan penolakan</label>
                                 <textarea
                                     value={rejectReason}
-                                    onChange={(event) => setRejectReason(event.target.value)}
+                                    onChange={(event) => {
+                                        setChangeRequestReviewError('');
+                                        setRejectReason(event.target.value);
+                                    }}
                                     placeholder="Contoh: Perubahan nama tidak sesuai dengan foto KTP terbaru."
                                     className="min-h-28 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                                    maxLength={500}
                                 />
+                                <p className="text-xs text-slate-500">Minimal 5 karakter, maksimal 500 karakter.</p>
                             </div>
                         ) : null}
 
@@ -690,7 +744,7 @@ export default function AdminIdentitiesPage() {
                             <Button
                                 variant={changeRequestReviewDialog?.status === 'REJECTED' ? 'destructive' : 'default'}
                                 onClick={() => void handleReviewChangeRequest()}
-                                disabled={Boolean(changeRequestReviewDialog && reviewingRequestId === changeRequestReviewDialog.request.id) || (changeRequestReviewDialog?.status === 'REJECTED' && rejectReason.trim().length < 5)}
+                                disabled={Boolean(changeRequestReviewDialog && reviewingRequestId === changeRequestReviewDialog.request.id)}
                             >
                                 {changeRequestReviewDialog && reviewingRequestId === changeRequestReviewDialog.request.id ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                                 Ya, {changeRequestReviewDialog?.status === 'APPROVED' ? 'Approve' : 'Reject'}

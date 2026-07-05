@@ -12,12 +12,14 @@ import {
     Dialog,
     DialogContent,
     DialogDescription,
+    DialogFooter,
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
 import { DocumentTable } from '@/components/documents/document-table';
 import { EmptyState } from '@/components/common/empty-state';
 import {
+    deleteDraftCertificationDocument,
     listMyCertificationDocuments,
     getCertificationDocumentOriginalFile,
     getCertificationDocumentSignedFile,
@@ -39,8 +41,11 @@ export default function DocumentsPage() {
     const [documents, setDocuments] = useState<OwnedDocumentItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [uploading, setUploading] = useState(false);
+    const [deletingDocumentId, setDeletingDocumentId] = useState('');
+    const [deleteDialog, setDeleteDialog] = useState<OwnedDocumentItem | null>(null);
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
+    const [success, setSuccess] = useState('');
 
     const [search, setSearch] = useState('');
     const [statusFilter, setStatusFilter] = useState<'all' | 'draft' | 'pending' | 'signed'>('all');
@@ -51,6 +56,7 @@ export default function DocumentsPage() {
     const loadDocuments = async () => {
         setError('');
         setNotice('');
+        setSuccess('');
         try {
             const response = await listMyCertificationDocuments();
             setDocuments(response.documents);
@@ -154,6 +160,7 @@ export default function DocumentsPage() {
     const handleDownloadOriginal = async (doc: OwnedDocumentItem) => {
         setError('');
         setNotice('');
+        setSuccess('');
         try {
             const blob = await getCertificationDocumentOriginalFile(doc.id);
             triggerDownload(blob, doc.originalFileName ?? `${doc.id}.pdf`);
@@ -195,6 +202,42 @@ export default function DocumentsPage() {
         }
 
         fileInputRef.current?.click();
+    };
+
+    const handleDeleteDraft = async (doc: OwnedDocumentItem) => {
+        if (doc.status !== 'DRAFT' || doc.accessType !== 'OWNER') {
+            setError('Hanya dokumen draft milik Anda yang dapat dihapus.');
+            return;
+        }
+
+        setError('');
+        setSuccess('');
+        setNotice('');
+        setDeleteDialog(doc);
+    };
+
+    const confirmDeleteDraft = async () => {
+        if (!deleteDialog) {
+            return;
+        }
+
+        const doc = deleteDialog;
+
+        setError('');
+        setNotice('');
+        setSuccess('');
+        setDeletingDocumentId(doc.id);
+
+        try {
+            const result = await deleteDraftCertificationDocument(doc.id);
+            setDocuments((current) => current.filter((item) => item.id !== doc.id));
+            setSuccess(result.message);
+            setDeleteDialog(null);
+        } catch (err) {
+            setError(normalizeErrorMessage(err));
+        } finally {
+            setDeletingDocumentId('');
+        }
     };
 
     const handleFileSelected = async (event: ChangeEvent<HTMLInputElement>) => {
@@ -254,6 +297,12 @@ export default function DocumentsPage() {
                     </Alert>
                 ) : null}
 
+                {success ? (
+                    <Alert className="border-emerald-200 bg-emerald-50 text-emerald-800">
+                        <AlertDescription>{success}</AlertDescription>
+                    </Alert>
+                ) : null}
+
                 <div className="grid grid-cols-1 gap-3 rounded-lg border border-slate-200 bg-white p-3 shadow-sm md:grid-cols-[1fr_auto_auto]">
                     <div className="relative">
                         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -301,6 +350,8 @@ export default function DocumentsPage() {
                             onSortChange={handleSortChange}
                             onDownloadOriginal={handleDownloadOriginal}
                             onDownloadIpfs={handleDownloadIpfs}
+                            onDeleteDraft={handleDeleteDraft}
+                            deletingDocumentId={deletingDocumentId}
                         />
 
                         <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm sm:flex-row sm:items-center sm:justify-between">
@@ -350,6 +401,53 @@ export default function DocumentsPage() {
                     <div className="flex justify-end">
                         <Button onClick={() => setNotice('')}>Mengerti</Button>
                     </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog
+                open={Boolean(deleteDialog)}
+                onOpenChange={(open) => {
+                    if (!open && !deletingDocumentId) {
+                        setDeleteDialog(null);
+                    }
+                }}
+            >
+                <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
+                    <DialogHeader>
+                        <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-red-50 text-red-700">
+                            <AlertTriangle className="h-5 w-5" />
+                        </div>
+                        <DialogTitle>Hapus Dokumen Draft?</DialogTitle>
+                        <DialogDescription>
+                            Dokumen draft akan dihapus dari daftar dokumen dan tidak dapat dikembalikan.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+                        <p className="text-xs font-semibold uppercase text-slate-500">Dokumen</p>
+                        <p className="mt-1 break-words font-semibold text-slate-900">
+                            {deleteDialog?.originalFileName ?? deleteDialog?.finalFileName ?? 'Dokumen PDF'}
+                        </p>
+                    </div>
+
+                    <DialogFooter>
+                        <Button
+                            variant="outline"
+                            className="border-slate-300"
+                            onClick={() => setDeleteDialog(null)}
+                            disabled={Boolean(deletingDocumentId)}
+                        >
+                            Batal
+                        </Button>
+                        <Button
+                            variant="destructive"
+                            onClick={() => void confirmDeleteDraft()}
+                            disabled={Boolean(deletingDocumentId)}
+                        >
+                            {deletingDocumentId ? <RefreshCw className="h-4 w-4 animate-spin" /> : null}
+                            Ya, Hapus Draft
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </AppShell>

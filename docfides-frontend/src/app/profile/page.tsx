@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useEffect, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertCircle, CheckCircle2, Eye, EyeOff, IdCard, Loader2, LockKeyhole, UploadCloud, UserCircle } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -28,6 +28,8 @@ const today = new Date().toISOString().slice(0, 10);
 const onlyDigits = (value: string) => value.replace(/\D/g, '');
 const onlyLettersAndSpaces = (value: string) => value.replace(/[^\p{L}\s]/gu, '');
 const onlyNameCharacters = (value: string) => value.replace(/[^\p{L}\s.'-]/gu, '');
+const allowedKtpMimeTypes = ['image/jpeg', 'image/png'];
+const allowedKtpExtensions = ['jpg', 'jpeg', 'png'];
 
 const identityStatusLabels: Record<IdentityStatus, string> = {
     NOT_SUBMITTED: 'Belum Mengajukan',
@@ -36,8 +38,31 @@ const identityStatusLabels: Record<IdentityStatus, string> = {
     REJECTED: 'Ditolak',
 };
 
+const roleLabels: Record<string, string> = {
+    SUPERADMIN: 'Superadmin',
+    JURUSAN: 'Ketua Jurusan',
+    PRODI: 'Ketua Program Studi',
+    ADMIN_PRODI: 'Admin Prodi',
+    DOSEN: 'Dosen',
+    MAHASISWA: 'Mahasiswa',
+};
+
 const getIdentityStatusLabel = (status?: IdentityStatus | null) =>
     status ? identityStatusLabels[status] ?? status : 'Belum Mengajukan';
+
+const getAcademicTypeLabel = (type?: string | null) => (
+    type === 'STUDENT' ? 'Mahasiswa' : 'Dosen / Tenaga Kependidikan'
+);
+
+const getAcademicIdentifierLabel = (profile?: User['academicProfile'] | null) => {
+    if (!profile) return 'Identitas Akademik';
+    return profile.type === 'STUDENT' ? 'NIM' : 'NIP / NIDN';
+};
+
+const isValidKtpImageFile = (file: File) => {
+    const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
+    return allowedKtpMimeTypes.includes(file.type) && allowedKtpExtensions.includes(extension);
+};
 
 export default function ProfilePage() {
     const router = useRouter();
@@ -68,6 +93,7 @@ export default function ProfilePage() {
     const [submittingAcademic, setSubmittingAcademic] = useState(false);
     const [savingPassword, setSavingPassword] = useState(false);
     const [error, setError] = useState('');
+    const [identityError, setIdentityError] = useState('');
     const [success, setSuccess] = useState('');
 
     useEffect(() => {
@@ -151,30 +177,61 @@ export default function ProfilePage() {
     const handleSubmitIdentity = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         setError('');
+        setIdentityError('');
         setSuccess('');
 
         if (identityStatus === 'PENDING' || identityProfile?.pendingChangeRequest) {
-            setError('Data identitas sedang menunggu review admin.');
+            setIdentityError('Data identitas sedang menunggu review admin. Form akan aktif kembali setelah admin menyetujui atau menolak pengajuan.');
             return;
         }
 
-        if (!identityForm.nik || !identityForm.fullName || !identityForm.birthPlace || !identityForm.birthDate || !identityForm.address) {
-            setError('Mohon lengkapi semua field identitas wajib.');
+        if (!identityForm.nik.trim()) {
+            setIdentityError('NIK KTP wajib diisi dengan 16 digit angka.');
             return;
         }
 
         if (identityForm.nik.length !== 16) {
-            setError('NIK harus berisi tepat 16 digit angka.');
+            setIdentityError('NIK KTP harus berisi tepat 16 digit angka tanpa spasi atau tanda baca.');
+            return;
+        }
+
+        if (!identityForm.fullName.trim()) {
+            setIdentityError('Nama lengkap sesuai KTP wajib diisi.');
+            return;
+        }
+
+        if (identityForm.fullName.trim().length < 2) {
+            setIdentityError('Nama lengkap minimal 2 karakter.');
+            return;
+        }
+
+        if (!identityForm.birthPlace.trim()) {
+            setIdentityError('Tempat lahir wajib diisi dengan huruf saja.');
+            return;
+        }
+
+        if (!identityForm.birthDate) {
+            setIdentityError('Tanggal lahir wajib dipilih sesuai KTP.');
+            return;
+        }
+
+        if (!identityForm.address.trim()) {
+            setIdentityError('Alamat sesuai KTP wajib diisi lengkap.');
             return;
         }
 
         if (identityForm.birthDate > today) {
-            setError('Tanggal lahir tidak boleh melebihi tanggal hari ini.');
+            setIdentityError('Tanggal lahir tidak boleh melebihi tanggal hari ini.');
             return;
         }
 
         if (!identityProfile?.identityExists && !ktpFile) {
-            setError('Upload file KTP wajib untuk submit identitas pertama kali.');
+            setIdentityError('Foto KTP wajib diunggah untuk pengajuan identitas pertama kali.');
+            return;
+        }
+
+        if (ktpFile && !isValidKtpImageFile(ktpFile)) {
+            setIdentityError('Format file KTP tidak sesuai. Gunakan gambar JPG, JPEG, atau PNG.');
             return;
         }
 
@@ -191,7 +248,7 @@ export default function ProfilePage() {
                 saveAuthData(token, response);
             }
         } catch (err) {
-            setError(normalizeErrorMessage(err));
+            setIdentityError(normalizeErrorMessage(err));
         } finally {
             setSubmittingIdentity(false);
         }
@@ -304,9 +361,32 @@ export default function ProfilePage() {
             : identityProfile?.identityExists
                 ? 'Update & Submit Ulang'
                 : 'Submit Identitas';
+    const academicReady = Boolean(academicProfile);
+    const identityReady = identityStatus === 'APPROVED';
+    const profileSteps = [
+        {
+            title: 'Profil Akademik',
+            description: academicReady
+                ? `${academicProfile?.unitCode ?? ''} - ${academicProfile?.unitName ?? ''}`
+                : 'Data prodi, NIM, atau unit belum lengkap.',
+            ready: academicReady,
+        },
+        {
+            title: 'Identitas KTP',
+            description: identityReady
+                ? 'Identitas sudah diverifikasi admin.'
+                : getIdentityStatusLabel(identityStatus),
+            ready: identityReady,
+        },
+        {
+            title: 'Keamanan Akun',
+            description: 'Password dapat diganti kapan saja.',
+            ready: true,
+        },
+    ];
 
     return (
-        <AppShell title="Profil Saya" subtitle="Lihat data akun dan ubah password login.">
+        <AppShell title="Profil Saya" subtitle="Lengkapi data akademik, identitas KTP, dan keamanan akun.">
             <div className="space-y-5">
                 {error ? (
                     <Alert className="border-red-200 bg-red-50 text-red-800">
@@ -333,7 +413,7 @@ export default function ProfilePage() {
                                 {profileName}
                             </h1>
                             <div className="mt-2 flex flex-wrap gap-2">
-                                <Badge className="bg-white/15 text-white hover:bg-white/20">{profile?.role?.replace(/_/g, ' ')}</Badge>
+                                <Badge className="bg-white/15 text-white hover:bg-white/20">{roleLabels[profile?.role ?? ''] ?? profile?.role?.replace(/_/g, ' ')}</Badge>
                                 <Badge className="bg-white/15 text-white hover:bg-white/20">
                                     Identitas: {getIdentityStatusLabel(identityStatus)}
                                 </Badge>
@@ -341,6 +421,22 @@ export default function ProfilePage() {
                         </div>
                     </div>
                 </section>
+
+                <div className="grid gap-3 md:grid-cols-3">
+                    {profileSteps.map((step) => (
+                        <div key={step.title} className={`rounded-2xl border px-4 py-3 shadow-sm ${step.ready ? 'border-emerald-100 bg-emerald-50' : 'border-amber-100 bg-amber-50'}`}>
+                            <div className="flex items-start gap-3">
+                                <div className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${step.ready ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                                    {step.ready ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+                                </div>
+                                <div>
+                                    <p className="text-sm font-bold text-slate-900">{step.title}</p>
+                                    <p className="mt-0.5 text-xs leading-5 text-slate-600">{step.description}</p>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
 
                 <div className="grid gap-5 lg:grid-cols-[1fr_380px]">
                     <div className="space-y-5">
@@ -354,7 +450,7 @@ export default function ProfilePage() {
                             </CardHeader>
                             <CardContent className="grid gap-3 sm:grid-cols-2">
                                 <InfoItem label="Email" value={profile?.email ?? '-'} />
-                                <InfoItem label="Role" value={profile?.role?.replace(/_/g, ' ') ?? '-'} />
+                                <InfoItem label="Peran" value={roleLabels[profile?.role ?? ''] ?? profile?.role?.replace(/_/g, ' ') ?? '-'} />
                                 <InfoItem label="Nama KTP" value={identityProfile?.fullName ?? profile?.identity?.fullName ?? '-'} />
                                 <InfoItem label="Status Identitas" value={getIdentityStatusLabel(identityStatus)} />
                             </CardContent>
@@ -363,14 +459,14 @@ export default function ProfilePage() {
                         <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
                             <CardHeader>
                                 <CardTitle>Profil Akademik</CardTitle>
-                                <CardDescription>Data akademik atau pegawai yang melekat pada akun.</CardDescription>
+                                <CardDescription>Data akademik yang dipakai untuk menentukan prodi, jabatan, dan alur sertifikasi.</CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4">
                                 <div className="grid gap-3 sm:grid-cols-2">
                                 {academicProfile ? (
                                     <>
-                                        <InfoItem label="Tipe" value={academicProfile.type === 'STUDENT' ? 'Mahasiswa' : 'Pegawai'} />
-                                        <InfoItem label="Identitas Kampus" value={academicProfile.identifier ?? '-'} />
+                                        <InfoItem label="Tipe" value={getAcademicTypeLabel(academicProfile.type)} />
+                                        <InfoItem label={getAcademicIdentifierLabel(academicProfile)} value={academicProfile.identifier ?? '-'} />
                                         <InfoItem label="Unit" value={`${academicProfile.unitCode} - ${academicProfile.unitName}`} />
                                         <InfoItem label="Posisi" value={academicProfile.positionTitle ?? academicProfile.employeeType ?? '-'} />
                                         {academicProfile.kelas || academicProfile.angkatan ? (
@@ -378,7 +474,7 @@ export default function ProfilePage() {
                                         ) : null}
                                     </>
                                 ) : (
-                                    <p className="text-sm text-slate-500 sm:col-span-2">Belum ada profil akademik pada akun ini.</p>
+                                    <p className="text-sm text-slate-500 sm:col-span-2">Belum ada profil akademik. Hubungi admin prodi atau superadmin untuk melengkapi data akademik.</p>
                                 )}
                                 </div>
 
@@ -491,14 +587,24 @@ export default function ProfilePage() {
                                     </Alert>
                                 ) : null}
 
+                                {identityError ? (
+                                    <Alert className="border-red-200 bg-red-50 text-red-800">
+                                        <AlertCircle className="h-4 w-4" />
+                                        <AlertDescription>{identityError}</AlertDescription>
+                                    </Alert>
+                                ) : null}
+
                                 <form onSubmit={handleSubmitIdentity} className="grid gap-4 md:grid-cols-2">
                                     <div className="space-y-1.5">
-                                        <label className="text-xs font-semibold text-slate-700">NIK KTP</label>
+                                        <RequiredLabel>NIK KTP</RequiredLabel>
                                         <p className="text-xs text-slate-500">Masukkan 16 digit angka tanpa spasi atau tanda baca.</p>
                                         <Input
                                             placeholder="Contoh: 3504020101990001"
                                             value={identityForm.nik}
-                                            onChange={(event) => setIdentityForm((prev) => ({ ...prev, nik: onlyDigits(event.target.value).slice(0, 16) }))}
+                                            onChange={(event) => {
+                                                setIdentityError('');
+                                                setIdentityForm((prev) => ({ ...prev, nik: onlyDigits(event.target.value).slice(0, 16) }));
+                                            }}
                                             maxLength={16}
                                             inputMode="numeric"
                                             pattern="[0-9]*"
@@ -506,40 +612,49 @@ export default function ProfilePage() {
                                         />
                                     </div>
                                     <div className="space-y-1.5">
-                                        <label className="text-xs font-semibold text-slate-700">Nama lengkap sesuai KTP</label>
+                                        <RequiredLabel>Nama lengkap sesuai KTP</RequiredLabel>
                                         <p className="text-xs text-slate-500">Nama ini dipakai sebagai nama sertifikat.</p>
                                         <Input
                                             placeholder="Contoh: Andi Saputra"
                                             value={identityForm.fullName}
-                                            onChange={(event) => setIdentityForm((prev) => ({ ...prev, fullName: onlyNameCharacters(event.target.value) }))}
+                                            onChange={(event) => {
+                                                setIdentityError('');
+                                                setIdentityForm((prev) => ({ ...prev, fullName: onlyNameCharacters(event.target.value) }));
+                                            }}
                                             maxLength={150}
                                             disabled={identityFormLocked}
                                         />
                                     </div>
                                     <div className="space-y-1.5">
-                                        <label className="text-xs font-semibold text-slate-700">Tempat lahir</label>
+                                        <RequiredLabel>Tempat lahir</RequiredLabel>
                                         <p className="text-xs text-slate-500">Wajib huruf saja, tanpa angka.</p>
                                         <Input
                                             placeholder="Contoh: Malang"
                                             value={identityForm.birthPlace}
-                                            onChange={(event) => setIdentityForm((prev) => ({ ...prev, birthPlace: onlyLettersAndSpaces(event.target.value) }))}
+                                            onChange={(event) => {
+                                                setIdentityError('');
+                                                setIdentityForm((prev) => ({ ...prev, birthPlace: onlyLettersAndSpaces(event.target.value) }));
+                                            }}
                                             maxLength={100}
                                             disabled={identityFormLocked}
                                         />
                                     </div>
                                     <div className="space-y-1.5">
-                                        <label className="text-xs font-semibold text-slate-700">Tanggal lahir</label>
+                                        <RequiredLabel>Tanggal lahir</RequiredLabel>
                                         <p className="text-xs text-slate-500">Pilih tanggal lahir sesuai KTP.</p>
                                         <Input
                                             type="date"
                                             value={identityForm.birthDate}
                                             max={today}
-                                            onChange={(event) => setIdentityForm((prev) => ({ ...prev, birthDate: event.target.value }))}
+                                            onChange={(event) => {
+                                                setIdentityError('');
+                                                setIdentityForm((prev) => ({ ...prev, birthDate: event.target.value }));
+                                            }}
                                             disabled={identityFormLocked}
                                         />
                                     </div>
                                     <div className="space-y-1.5 md:col-span-2">
-                                        <label className="text-xs font-semibold text-slate-700">Alamat sesuai KTP</label>
+                                        <RequiredLabel>Alamat sesuai KTP</RequiredLabel>
                                         <p className="text-xs text-slate-500">Tuliskan alamat lengkap sesuai KTP.</p>
                                         <textarea
                                             className="min-h-28 w-full resize-y rounded-md border border-slate-300 bg-white px-3 py-2 text-sm shadow-xs outline-none focus:border-slate-400 disabled:cursor-not-allowed disabled:opacity-50"
@@ -547,7 +662,10 @@ export default function ProfilePage() {
                                             placeholder="Contoh: Jl. Mawar No. 10, RT 01/RW 02, Lowokwaru, Malang"
                                             value={identityForm.address}
                                             maxLength={500}
-                                            onChange={(event) => setIdentityForm((prev) => ({ ...prev, address: event.target.value.slice(0, 500) }))}
+                                            onChange={(event) => {
+                                                setIdentityError('');
+                                                setIdentityForm((prev) => ({ ...prev, address: event.target.value.slice(0, 500) }));
+                                            }}
                                             disabled={identityFormLocked}
                                         />
                                     </div>
@@ -555,6 +673,7 @@ export default function ProfilePage() {
                                         <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
                                             <UploadCloud className="h-4 w-4" />
                                             Upload KTP (jpg/png, max 3MB)
+                                            {!identityProfile?.identityExists ? <span className="text-red-500">*</span> : null}
                                         </label>
                                         <p className="text-xs text-slate-500">
                                             Submit pertama wajib mengunggah KTP. Untuk request perubahan, upload ulang jika foto KTP juga perlu diganti.
@@ -565,13 +684,25 @@ export default function ProfilePage() {
                                             disabled={identityFormLocked}
                                             onChange={(event) => {
                                                 const file = event.target.files?.[0] ?? null;
-                                                if (file && file.size > 3 * 1024 * 1024) {
-                                                    setError('Ukuran file KTP maksimal 3MB.');
+                                                if (!file) {
+                                                    setKtpFile(null);
+                                                    return;
+                                                }
+
+                                                if (!isValidKtpImageFile(file)) {
+                                                    setIdentityError('Format file KTP tidak sesuai. Pilih file gambar JPG, JPEG, atau PNG.');
                                                     event.target.value = '';
                                                     setKtpFile(null);
                                                     return;
                                                 }
-                                                setError('');
+
+                                                if (file && file.size > 3 * 1024 * 1024) {
+                                                    setIdentityError('Ukuran file KTP maksimal 3MB.');
+                                                    event.target.value = '';
+                                                    setKtpFile(null);
+                                                    return;
+                                                }
+                                                setIdentityError('');
                                                 setKtpFile(file);
                                             }}
                                         />
@@ -640,6 +771,15 @@ function InfoItem({ label, value }: { label: string; value: string }) {
             <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
             <p className="mt-1 break-words text-sm font-semibold text-slate-800">{value}</p>
         </div>
+    );
+}
+
+function RequiredLabel({ children }: { children: ReactNode }) {
+    return (
+        <label className="text-xs font-semibold text-slate-700">
+            {children}
+            <span className="ml-1 text-red-500">*</span>
+        </label>
     );
 }
 

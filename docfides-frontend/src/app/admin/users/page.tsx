@@ -36,6 +36,28 @@ type AcademicReviewDialogState = {
     status: 'APPROVED' | 'REJECTED';
 } | null;
 
+const roleLabels: Record<UserRole, string> = {
+    SUPERADMIN: 'Superadmin',
+    JURUSAN: 'Ketua Jurusan',
+    PRODI: 'Ketua Prodi',
+    ADMIN_PRODI: 'Admin Prodi',
+    DOSEN: 'Dosen',
+    MAHASISWA: 'Mahasiswa',
+};
+
+const identityLabels: Record<string, string> = {
+    APPROVED: 'Terverifikasi',
+    PENDING: 'Menunggu',
+    REJECTED: 'Ditolak',
+    NO_IDENTITY: 'Belum Ada',
+};
+
+const statusLabels: Record<string, string> = {
+    ACTIVE: 'Aktif',
+    SUSPENDED: 'Ditangguhkan',
+    DISABLED: 'Nonaktif',
+};
+
 export default function AdminUsersPage() {
     const router = useRouter();
     const currentUser = useMemo(() => getUser(), []);
@@ -92,6 +114,12 @@ export default function AdminUsersPage() {
     const totalPages = Math.max(1, Math.ceil(filteredUsers.length / pageSize));
     const safePage = Math.min(page, totalPages);
     const paginatedUsers = filteredUsers.slice((safePage - 1) * pageSize, safePage * pageSize);
+    const userSummary = useMemo(() => ({
+        total: users.length,
+        mahasiswa: users.filter((user) => user.role === 'MAHASISWA').length,
+        dosen: users.filter((user) => user.role === 'DOSEN').length,
+        identityPending: users.filter((user) => user.identity?.status === 'PENDING' || !user.identity).length,
+    }), [users]);
 
     useEffect(() => {
         setPage(1);
@@ -167,7 +195,7 @@ export default function AdminUsersPage() {
             return `${user.employeeProfile.positionTitle ?? user.employeeProfile.employeeType} - ${user.employeeProfile.homeUnit.name}`;
         }
 
-        return 'Belum ada profil kampus';
+        return 'Belum ada profil akademik';
     };
 
     if (loading) {
@@ -198,6 +226,28 @@ export default function AdminUsersPage() {
                         <AlertDescription>{success}</AlertDescription>
                     </Alert>
                 ) : null}
+
+                <div className="grid gap-3 md:grid-cols-4">
+                    {[
+                        { label: 'Total User', value: userSummary.total, desc: 'Semua akun dalam cakupan Anda', tone: 'bg-blue-50 text-blue-700' },
+                        { label: 'Mahasiswa', value: userSummary.mahasiswa, desc: 'Akun mahasiswa aktif/terdaftar', tone: 'bg-emerald-50 text-emerald-700' },
+                        { label: 'Dosen', value: userSummary.dosen, desc: 'Akun dosen yang dapat menjadi signer', tone: 'bg-indigo-50 text-indigo-700' },
+                        { label: 'Perlu Review', value: academicRequests.length + userSummary.identityPending, desc: 'Identitas atau profil akademik', tone: 'bg-amber-50 text-amber-700' },
+                    ].map((item) => (
+                        <Card key={item.label} className="border-slate-200 bg-white shadow-sm">
+                            <CardContent className="flex items-center justify-between p-4">
+                                <div>
+                                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400">{item.label}</p>
+                                    <p className="mt-1 text-2xl font-extrabold text-slate-950">{item.value}</p>
+                                    <p className="mt-1 text-xs text-slate-500">{item.desc}</p>
+                                </div>
+                                <div className={`flex h-10 w-10 items-center justify-center rounded-xl ${item.tone}`}>
+                                    <Users className="h-5 w-5" />
+                                </div>
+                            </CardContent>
+                        </Card>
+                    ))}
+                </div>
 
                 <Card className="border-amber-200 bg-white shadow-sm">
                     <CardHeader>
@@ -294,7 +344,7 @@ export default function AdminUsersPage() {
                                 </div>
                                 <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value as UserRole | 'ALL')} className="h-9 rounded-md border border-slate-300 bg-white px-2 text-sm">
                                     <option value="ALL">Semua role</option>
-                                    {roles.map((role) => <option key={role} value={role}>{role}</option>)}
+                                    {roles.map((role) => <option key={role} value={role}>{roleLabels[role]}</option>)}
                                 </select>
                                 {currentUser?.role === 'SUPERADMIN' ? (
                                     <Button asChild className="h-9">
@@ -333,15 +383,15 @@ export default function AdminUsersPage() {
                                                 <p className="font-medium text-slate-900">{user.displayName ?? '-'}</p>
                                                 <p className="mt-0.5 text-xs text-slate-500">{user.email}</p>
                                             </td>
-                                            <td className="px-4 py-3"><Badge variant="neutral">{user.role}</Badge></td>
+                                            <td className="px-4 py-3"><Badge variant="neutral">{roleLabels[user.role]}</Badge></td>
                                             <td className="px-4 py-3 text-slate-600">{getProfileLabel(user)}</td>
                                             <td className="px-4 py-3">
                                                 <Badge variant={user.identity?.status === 'APPROVED' ? 'success' : user.identity?.status === 'REJECTED' ? 'destructive' : 'warning'}>
-                                                    {user.identity?.status ?? 'NO_IDENTITY'}
+                                                    {identityLabels[user.identity?.status ?? 'NO_IDENTITY'] ?? user.identity?.status ?? 'Belum Ada'}
                                                 </Badge>
                                             </td>
                                             <td className="px-4 py-3">
-                                                <Badge variant={user.status === 'ACTIVE' ? 'success' : user.status === 'DISABLED' ? 'neutral' : 'warning'}>{user.status}</Badge>
+                                                <Badge variant={user.status === 'ACTIVE' ? 'success' : user.status === 'DISABLED' ? 'neutral' : 'warning'}>{statusLabels[user.status] ?? user.status}</Badge>
                                             </td>
                                             {(currentUser?.role === 'SUPERADMIN' || currentUser?.role === 'ADMIN_PRODI') ? (
                                             <td className="px-4 py-3">

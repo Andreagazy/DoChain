@@ -57,6 +57,9 @@ import {
     IdentityChangeRequestItem,
     AcademicProfileChangePayload,
     AcademicProfileChangeRequestItem,
+    AdminDocumentRevokeRequestsResponse,
+    RequestDocumentRevokeResponse,
+    ReviewDocumentRevokeRequestPayload,
 } from '@/types/auth';
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
@@ -358,6 +361,15 @@ export const getCertificationDocumentSignedFile = async (documentId: string): Pr
     return response.data as Blob;
 };
 
+export const deleteDraftCertificationDocument = async (
+    documentId: string,
+): Promise<{ message: string }> => {
+    const response = await api.delete<{ message: string }>(
+        `/certification/documents/${documentId}`,
+    );
+    return response.data;
+};
+
 export const listSignerCandidates = async (): Promise<SignerCandidatesResponse> => {
     const response = await api.get<SignerCandidatesResponse>('/certification/signers/candidates');
     return response.data;
@@ -603,6 +615,50 @@ export const revokeAdminDocument = async (
     const response = await api.delete<RevokeAdminDocumentResponse>(
         `/admin/documents/${documentId}`,
         { data: payload },
+    );
+    return response.data;
+};
+
+export const requestDocumentRevoke = async (
+    documentId: string,
+    reason: string,
+    evidenceImages: File[],
+): Promise<RequestDocumentRevokeResponse> => {
+    const formData = new FormData();
+    formData.append('reason', reason);
+    evidenceImages.forEach((file) => formData.append('evidenceImages', file));
+
+    const response = await api.post<RequestDocumentRevokeResponse>(
+        `/certification/documents/${documentId}/revoke-requests`,
+        formData,
+        { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+    return response.data;
+};
+
+export const listAdminDocumentRevokeRequests = async (): Promise<AdminDocumentRevokeRequestsResponse> => {
+    const response = await api.get<AdminDocumentRevokeRequestsResponse>('/admin/document-revoke-requests');
+    return response.data;
+};
+
+export const getAdminDocumentRevokeEvidence = async (
+    requestId: string,
+    evidenceId: string,
+): Promise<Blob> => {
+    const response = await api.get(
+        `/admin/document-revoke-requests/${requestId}/evidences/${evidenceId}`,
+        { responseType: 'blob' },
+    );
+    return response.data as Blob;
+};
+
+export const reviewAdminDocumentRevokeRequest = async (
+    requestId: string,
+    payload: ReviewDocumentRevokeRequestPayload,
+): Promise<{ message: string }> => {
+    const response = await api.patch<{ message: string }>(
+        `/admin/document-revoke-requests/${requestId}/review`,
+        payload,
     );
     return response.data;
 };

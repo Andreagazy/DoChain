@@ -1,8 +1,7 @@
 'use client';
 
-import Link from 'next/link';
 import { CheckCircle2, ClipboardCheck, MapPinned, UploadCloud, Users } from 'lucide-react';
-import { buildCertificationStepHref, getCertificationStepIndex, type CertificationStepKey } from '@/lib/certification-flow';
+import { getCertificationStepIndex, type CertificationStepKey } from '@/lib/certification-flow';
 
 const STEPS: Array<{
     key: CertificationStepKey;
@@ -43,6 +42,7 @@ interface CertificationStepperProps {
 
 export function CertificationStepper({ currentStep, documentId }: CertificationStepperProps) {
     const currentIndex = getCertificationStepIndex(currentStep);
+    void documentId;
 
     return (
         <nav className="rounded-2xl border border-blue-100 bg-white p-3 shadow-sm" aria-label="Langkah sertifikasi">
@@ -54,14 +54,14 @@ export function CertificationStepper({ currentStep, documentId }: CertificationS
 
                 return (
                     <li key={step.key}>
-                        <Link
-                            href={buildCertificationStepHref(step.key, step.key === 'upload' ? undefined : documentId)}
-                            className={`flex h-full items-center gap-3 rounded-xl border px-3 py-3 transition ${
+                        <div
+                            aria-current={isActive ? 'step' : undefined}
+                            className={`flex h-full cursor-default items-center gap-3 rounded-xl border px-3 py-3 ${
                                 isActive
                                     ? 'border-blue-200 bg-blue-50 text-blue-700 shadow-sm'
                                     : isCompleted
-                                      ? 'border-emerald-100 bg-emerald-50/70 text-emerald-700 hover:bg-emerald-50'
-                                      : 'border-slate-100 bg-slate-50/70 text-slate-600 hover:border-blue-100 hover:bg-blue-50/50 hover:text-slate-950'
+                                      ? 'border-emerald-100 bg-emerald-50/70 text-emerald-700'
+                                      : 'border-slate-100 bg-slate-50/70 text-slate-600'
                             }`}
                         >
                             <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-xs font-semibold ${
@@ -78,7 +78,7 @@ export function CertificationStepper({ currentStep, documentId }: CertificationS
                                 <span className="block text-sm font-semibold">{step.label}</span>
                                 <span className="block truncate text-xs opacity-80">{step.description}</span>
                             </span>
-                        </Link>
+                        </div>
                     </li>
                 );
             })}

@@ -22,6 +22,19 @@ const structuralPositionByRole: Partial<Record<UserRole, 'KAJUR' | 'KAPRODI' | '
     PRODI: 'KAPRODI',
     ADMIN_PRODI: 'ADMIN_PRODI',
 };
+const roleLabels: Record<UserRole, string> = {
+    SUPERADMIN: 'Superadmin',
+    JURUSAN: 'Ketua Jurusan',
+    PRODI: 'Ketua Program Studi',
+    ADMIN_PRODI: 'Admin Prodi',
+    DOSEN: 'Dosen',
+    MAHASISWA: 'Mahasiswa',
+};
+const statusLabels: Record<AdminUserItem['status'], string> = {
+    ACTIVE: 'Aktif',
+    SUSPENDED: 'Ditangguhkan',
+    DISABLED: 'Nonaktif',
+};
 const onlyDigits = (value: string) => value.replace(/\D/g, '');
 const onlyNameCharacters = (value: string) => value.replace(/[^\p{L}\s.'-]/gu, '');
 
@@ -214,7 +227,7 @@ export default function AdminUserEditPage() {
     }
 
     return (
-        <AppShell title={isAdminProdi ? 'Edit Profil Anggota' : 'Edit User'} subtitle={user.email}>
+        <AppShell title={isAdminProdi ? 'Edit Profil Anggota' : 'Edit User'} subtitle="Perbarui akun, identitas akademik, dan status pengguna.">
             <div className="space-y-5">
                 <Button asChild variant="outline" className="border-slate-300">
                     <Link href="/admin/users">
@@ -250,8 +263,8 @@ export default function AdminUserEditPage() {
                         <CardTitle>Informasi Akun</CardTitle>
                         <CardDescription>
                             {isSuperadmin
-                                ? 'Role menentukan jenis profil kampus yang ditampilkan.'
-                                : 'Admin prodi hanya dapat memperbarui data profil kampus, bukan role atau status akun.'}
+                                ? 'Peran menentukan field profil akademik yang perlu diisi.'
+                                : 'Admin prodi hanya dapat memperbarui data akademik anggota, bukan role atau status akun.'}
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
@@ -261,8 +274,8 @@ export default function AdminUserEditPage() {
                         </div>
                         <div className="grid gap-3 md:grid-cols-3">
                             <div className="space-y-1.5">
-                                <label className="text-xs font-medium text-slate-600">Nama tampilan</label>
-                                <Input disabled={profileFieldsDisabled} value={draft.displayName} onChange={(event) => setDraft((current) => current ? { ...current, displayName: onlyNameCharacters(event.target.value) } : current)} placeholder="Nama tampilan" />
+                                <label className="text-xs font-medium text-slate-600">Nama akun</label>
+                                <Input disabled={profileFieldsDisabled} value={draft.displayName} onChange={(event) => setDraft((current) => current ? { ...current, displayName: onlyNameCharacters(event.target.value) } : current)} placeholder="Nama pengguna" />
                             </div>
                             {isSuperadmin ? (
                                 <div className="space-y-1.5">
@@ -283,13 +296,13 @@ export default function AdminUserEditPage() {
                             <div className="space-y-1.5">
                                 <label className="text-xs font-medium text-slate-600">Role akun</label>
                                 <select disabled={!isSuperadmin || saving} value={draft.role} onChange={(event) => setDraft((current) => current ? { ...current, role: event.target.value as UserRole } : current)} className="h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-sm disabled:bg-slate-100 disabled:text-slate-500">
-                                    {roles.map((role) => <option key={role} value={role}>{role}</option>)}
+                                    {roles.map((role) => <option key={role} value={role}>{roleLabels[role]}</option>)}
                                 </select>
                             </div>
                             <div className="space-y-1.5">
                                 <label className="text-xs font-medium text-slate-600">Status akun</label>
                                 <select disabled={!isSuperadmin || saving} value={draft.status} onChange={(event) => setDraft((current) => current ? { ...current, status: event.target.value as AdminUserItem['status'] } : current)} className="h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-sm disabled:bg-slate-100 disabled:text-slate-500">
-                                    {statuses.map((status) => <option key={status} value={status}>{status}</option>)}
+                                    {statuses.map((status) => <option key={status} value={status}>{statusLabels[status]}</option>)}
                                 </select>
                             </div>
                         </div>
@@ -298,7 +311,8 @@ export default function AdminUserEditPage() {
 
                 <Card className="border-slate-200 bg-white shadow-sm">
                     <CardHeader>
-                        <CardTitle>Profil Kampus</CardTitle>
+                        <CardTitle>Profil Akademik</CardTitle>
+                        <CardDescription>Data ini dipakai untuk cakupan prodi/jurusan dan pemilihan penandatangan.</CardDescription>
                     </CardHeader>
                     <CardContent>
                         {draft.role === 'MAHASISWA' ? (
@@ -327,7 +341,7 @@ export default function AdminUserEditPage() {
                             <div className="space-y-3">
                                 <div className="grid gap-3 md:grid-cols-3">
                                     <div className="space-y-1.5">
-                                        <label className="text-xs font-medium text-slate-600">NIP pegawai</label>
+                                        <label className="text-xs font-medium text-slate-600">NIP</label>
                                         <Input disabled={profileFieldsDisabled} value={draft.nip} onChange={(event) => setDraft((current) => current ? { ...current, nip: onlyDigits(event.target.value).slice(0, 40) } : current)} placeholder="NIP" inputMode="numeric" />
                                     </div>
                                     <div className="space-y-1.5">
@@ -335,7 +349,7 @@ export default function AdminUserEditPage() {
                                         <Input disabled={profileFieldsDisabled} value={draft.nidn} onChange={(event) => setDraft((current) => current ? { ...current, nidn: onlyDigits(event.target.value).slice(0, 40) } : current)} placeholder="NIDN" inputMode="numeric" />
                                     </div>
                                     <div className="space-y-1.5">
-                                        <label className="text-xs font-medium text-slate-600">Tipe pegawai</label>
+                                        <label className="text-xs font-medium text-slate-600">Jenis pegawai</label>
                                         <select disabled={profileFieldsDisabled} value={draft.employeeType} onChange={(event) => setDraft((current) => current ? { ...current, employeeType: event.target.value as UserDraft['employeeType'] } : current)} className="h-9 w-full rounded-md border border-slate-300 bg-white px-2 text-sm disabled:bg-slate-100 disabled:text-slate-500">
                                             {employeeTypes.map((type) => <option key={type} value={type}>{type}</option>)}
                                         </select>

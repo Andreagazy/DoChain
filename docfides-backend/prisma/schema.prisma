@@ -100,6 +100,8 @@ model User {
 
   ownedDocuments  Document[]      // Dokumen yang dibuat user (pemilik)
   revokedDocuments Document[]     @relation("DocumentRevokedBy")
+  revokeRequests DocumentRevokeRequest[] @relation("DocumentRevokeRequestRequester")
+  reviewedRevokeRequests DocumentRevokeRequest[] @relation("DocumentRevokeRequestReviewer")
   documentSigners DocumentSigner[] // Relasi ke peran penandatangan
   signatures      Signature[]     // Tanda tangan yang dilakukan user
 
@@ -325,6 +327,12 @@ enum DocumentStatus {
   REVOKED              // Dibatalkan
 }
 
+enum RevokeRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
 enum SignerStatus {
   PENDING   // Belum menandatangani
   SIGNED    // Sudah menandatangani
@@ -367,12 +375,51 @@ model Document {
   requiredSigners     DocumentSigner[]
   // Relasi ke semua peristiwa tanda tangan
   signatures          Signature[]
+  revokeRequests      DocumentRevokeRequest[]
 
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
 
   @@index([revokedById])
   @@map("documents")
+}
+
+model DocumentRevokeRequest {
+  id              String              @id @default(uuid())
+  documentId      String
+  document        Document            @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  requesterId     String
+  requester       User                @relation("DocumentRevokeRequestRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  reason          String
+  status          RevokeRequestStatus @default(PENDING)
+  reviewedById    String?
+  reviewedBy      User?               @relation("DocumentRevokeRequestReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt      DateTime?
+  reviewNote      String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  evidences       DocumentRevokeRequestEvidence[]
+
+  @@index([documentId, status])
+  @@index([requesterId, status])
+  @@index([reviewedById])
+  @@map("document_revoke_requests")
+}
+
+model DocumentRevokeRequestEvidence {
+  id               String                @id @default(uuid())
+  requestId        String
+  request          DocumentRevokeRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  originalFileName String
+  storedFileName   String
+  storagePath      String
+  mimeType         String
+  sizeBytes        Int
+  createdAt        DateTime              @default(now())
+
+  @@index([requestId])
+  @@map("document_revoke_request_evidences")
 }
 
 model DocumentSigner {

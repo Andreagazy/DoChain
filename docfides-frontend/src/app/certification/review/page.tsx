@@ -52,7 +52,6 @@ function CertificationReviewContent() {
     const [success, setSuccess] = useState('');
 
     const [currentUser, setCurrentUser] = useState<User | null>(null);
-    const [preferredMode, setPreferredMode] = useState<'visible' | 'invisible'>('visible');
     const [hasSignature, setHasSignature] = useState(false);
     const [myDocuments, setMyDocuments] = useState<OwnedDocumentItem[]>([]);
     const [selectedDocumentId, setSelectedDocumentId] = useState('');
@@ -88,7 +87,15 @@ function CertificationReviewContent() {
     const isFullySigned = selectedDocument?.status === 'FULLY_SIGNED';
     const canPlaceQrBeforeSigning = false;
     const shouldShowQrPlacement = false;
-    const canShowSignAction = Boolean(selectedDocument) && !isFullySigned;
+    const isCurrentUserSelectedSigner = Boolean(
+        currentUser?.id &&
+        documentSignerDetails?.signers.some((signer) => signer.userId === currentUser.id),
+    );
+    const canShowSignAction =
+        Boolean(selectedDocument) &&
+        !isFullySigned &&
+        Boolean(documentSignerDetails?.signers.length) &&
+        isCurrentUserSelectedSigner;
 
     const refreshSelectedDocumentState = async (documentId: string) => {
         const [documents, signerDetails] = await Promise.all([
@@ -131,7 +138,6 @@ function CertificationReviewContent() {
                     return;
                 }
 
-                setPreferredMode('visible');
                 setHasSignature(signatureStatus.hasSignature);
                 setMyDocuments(documents.documents);
 
@@ -418,6 +424,11 @@ function CertificationReviewContent() {
             return;
         }
 
+        if (!isCurrentUserSelectedSigner) {
+            setError('Akun Anda tidak terdaftar sebagai penandatangan pada dokumen ini.');
+            return;
+        }
+
         setSignConfirmOpen(true);
     };
 
@@ -574,6 +585,14 @@ function CertificationReviewContent() {
                                 <p className="text-sm text-slate-500">Belum ada detail signer untuk dokumen ini.</p>
                             )}
                         </div>
+
+                        {selectedDocument && documentSignerDetails?.signers?.length && !isCurrentUserSelectedSigner ? (
+                            <Alert className="border-amber-200 bg-amber-50 text-amber-900">
+                                <AlertDescription>
+                                    Akun Anda tidak terdaftar sebagai penandatangan dokumen ini, sehingga proses tanda tangan tidak dapat dilakukan dari halaman review.
+                                </AlertDescription>
+                            </Alert>
+                        ) : null}
 
                         <div className="flex flex-wrap gap-2">
                             <Button variant="outline" className="border-slate-300" onClick={() => {

@@ -1,6 +1,8 @@
 import {
+  BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -8,6 +10,7 @@ import {
   Req,
   Res,
   UploadedFile,
+  UploadedFiles,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
@@ -15,7 +18,7 @@ import type { Request, Response } from 'express';
 import { diskStorage } from 'multer';
 import { extname, join, resolve } from 'path';
 import { mkdirSync } from 'fs';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../auth/guard/jwt.guard';
 import { IdentityApprovedGuard } from '../identity/guard/identity-approved.guard';
 import { CertificationService } from './certification.service';
@@ -24,6 +27,7 @@ import { RequestSignersDto } from './dto/request-signers.dto';
 import { DeclineDocumentDto } from './dto/decline-document.dto';
 import { UpdateSignaturePreferenceDto } from './dto/update-signature-preference.dto';
 import { FinalizeQrDto } from './dto/finalize-qr.dto';
+import { RequestDocumentRevokeDto } from './dto/request-document-revoke.dto';
 
 type RequestWithUser = Request & {
   user: {
@@ -39,6 +43,11 @@ const signatureUploadRoot = resolve(
 const documentUploadRoot = resolve(
   process.cwd(),
   process.env.DOCUMENT_UPLOAD_DIR ?? 'uploads/documents',
+);
+
+const revokeEvidenceUploadRoot = resolve(
+  process.cwd(),
+  process.env.REVOKE_EVIDENCE_UPLOAD_DIR ?? 'uploads/revoke-evidences',
 );
 
 @Controller('certification')
@@ -101,6 +110,17 @@ export class CertificationController {
     @Param('documentId') documentId: string,
   ) {
     return this.certificationService.getDocumentDetail(
+      req.user.userId,
+      documentId,
+    );
+  }
+
+  @Delete('documents/:documentId')
+  async deleteDraftDocument(
+    @Req() req: RequestWithUser,
+    @Param('documentId') documentId: string,
+  ) {
+    return this.certificationService.deleteDraftDocument(
       req.user.userId,
       documentId,
     );
@@ -267,7 +287,17 @@ export class CertificationController {
       }),
       fileFilter: (_req, file, cb) => {
         const allowedMime = ['image/jpeg', 'image/jpg', 'image/png'];
-        cb(null, allowedMime.includes(file.mimetype));
+        if (!allowedMime.includes(file.mimetype)) {
+          cb(
+            new BadRequestException(
+              'Format file tanda tangan tidak sesuai. Gunakan JPG, JPEG, atau PNG.',
+            ),
+            false,
+          );
+          return;
+        }
+
+        cb(null, true);
       },
       limits: {
         fileSize: 2 * 1024 * 1024,
@@ -333,6 +363,53 @@ export class CertificationController {
       req.user.userId,
       documentId,
       dto,
+    );
+  }
+
+  @Post('documents/:documentId/revoke-requests')
+  @UseInterceptors(
+    FilesInterceptor('evidenceImages', 5, {
+      storage: diskStorage({
+        destination: (req, _file, cb) => {
+          const request = req as RequestWithUser;
+          const userDir = join(revokeEvidenceUploadRoot, request.user.userId);
+          mkdirSync(userDir, { recursive: true });
+          cb(null, userDir);
+        },
+        filename: (req, file, cb) => {
+          const request = req as RequestWithUser;
+          const extension = extname(file.originalname).toLowerCase() || '.jpg';
+          cb(
+            null,
+            `${request.user.userId}-${Date.now()}-${Math.round(Math.random() * 1e9)}${extension}`,
+          );
+        },
+      }),
+      limits: { fileSize: 3 * 1024 * 1024 },
+      fileFilter: (_req, file, cb) => {
+        if (
+          ['image/png', 'image/jpeg', 'image/jpg', 'image/webp'].includes(
+            file.mimetype,
+          )
+        ) {
+          cb(null, true);
+        } else {
+          cb(new Error('Bukti harus berupa gambar jpg/png/webp'), false);
+        }
+      },
+    }),
+  )
+  async requestRevoke(
+    @Req() req: RequestWithUser,
+    @Param('documentId') documentId: string,
+    @Body() dto: RequestDocumentRevokeDto,
+    @UploadedFiles() evidenceImages: Express.Multer.File[],
+  ) {
+    return this.certificationService.requestDocumentRevoke(
+      req.user.userId,
+      documentId,
+      dto,
+      evidenceImages,
     );
   }
 }

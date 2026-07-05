@@ -172,6 +172,241 @@ function shouldShowSignatureDetails(result: InspectResult) {
 
 /* ─── Sub-components ─────────────────────────────────────────────── */
 
+type SummaryTone = 'emerald' | 'red' | 'amber' | 'slate' | 'blue';
+
+type SummaryItem = {
+    label: string;
+    value: string;
+    description: string;
+    tone: SummaryTone;
+    icon: typeof CheckCircle2;
+};
+
+const summaryToneClass: Record<SummaryTone, string> = {
+    emerald: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+    red: 'border-red-200 bg-red-50 text-red-700',
+    amber: 'border-amber-200 bg-amber-50 text-amber-700',
+    slate: 'border-slate-200 bg-slate-50 text-slate-700',
+    blue: 'border-blue-200 bg-blue-50 text-blue-700',
+};
+
+function getDecisionSummary(result: InspectResult): SummaryItem {
+    const map: Record<InspectResult['overallStatus'], SummaryItem> = {
+        VALID: {
+            label: 'Keputusan',
+            value: 'Valid',
+            description: 'Dokumen dapat dinyatakan resmi dan aktif.',
+            tone: 'emerald',
+            icon: ShieldCheck,
+        },
+        MODIFIED: {
+            label: 'Keputusan',
+            value: 'Tidak valid',
+            description: 'File berbeda dari dokumen final resmi atau tanda tangan bermasalah.',
+            tone: 'red',
+            icon: ShieldX,
+        },
+        NO_SIGNATURES: {
+            label: 'Keputusan',
+            value: 'Belum lengkap',
+            description: 'Hash ditemukan, tetapi tanda tangan digital tidak terbaca.',
+            tone: 'amber',
+            icon: ShieldAlert,
+        },
+        PARTIAL: {
+            label: 'Keputusan',
+            value: 'Perlu pemeriksaan',
+            description: 'Sebagian bukti valid, tetapi tidak semua tanda tangan bisa dipastikan.',
+            tone: 'amber',
+            icon: ShieldAlert,
+        },
+        NOT_RECORDED: {
+            label: 'Keputusan',
+            value: 'Tidak terdaftar',
+            description: 'File tidak cocok dengan dokumen final resmi DOCChain.',
+            tone: 'slate',
+            icon: ShieldAlert,
+        },
+        REVOKED: {
+            label: 'Keputusan',
+            value: 'Dicabut',
+            description: 'Dokumen pernah tercatat, tetapi statusnya sudah tidak aktif.',
+            tone: 'red',
+            icon: ShieldX,
+        },
+    };
+
+    return map[result.overallStatus];
+}
+
+function getHashSummary(result: InspectResult): SummaryItem {
+    if (result.verification.hashMatchesBlockchain) {
+        return {
+            label: 'Kecocokan Hash',
+            value: 'Cocok',
+            description: 'SHA-256 file sama dengan catatan final.',
+            tone: 'emerald',
+            icon: Hash,
+        };
+    }
+
+    if (result.verification.registeredOnBlockchain) {
+        return {
+            label: 'Kecocokan Hash',
+            value: 'Tidak cocok',
+            description: 'File tidak sama dengan catatan final.',
+            tone: 'red',
+            icon: Hash,
+        };
+    }
+
+    return {
+        label: 'Kecocokan Hash',
+        value: 'Tidak ditemukan',
+        description: 'Hash file tidak tercatat sebagai dokumen final.',
+        tone: 'slate',
+        icon: Hash,
+    };
+}
+
+function getBlockchainSummary(result: InspectResult): SummaryItem {
+    if (!result.verification.registeredOnBlockchain) {
+        return {
+            label: 'Blockchain',
+            value: 'Tidak tercatat',
+            description: 'Tidak ada bukti final pada smart contract.',
+            tone: 'slate',
+            icon: Database,
+        };
+    }
+
+    if (result.verification.revokedOnBlockchain) {
+        return {
+            label: 'Blockchain',
+            value: 'Dicabut',
+            description: 'Catatan ditemukan, tetapi sudah direvoke.',
+            tone: 'red',
+            icon: Database,
+        };
+    }
+
+    return {
+        label: 'Blockchain',
+        value: 'Aktif',
+        description: 'Hash final tercatat dan belum dicabut.',
+        tone: 'emerald',
+        icon: Database,
+    };
+}
+
+function getSignatureSummary(result: InspectResult, showSignatureDetails: boolean): SummaryItem {
+    if (result.signatures.length === 0) {
+        return {
+            label: 'Tanda Tangan',
+            value: 'Tidak ada',
+            description: 'PDF tidak memiliki tanda tangan digital yang terbaca.',
+            tone: 'amber',
+            icon: Fingerprint,
+        };
+    }
+
+    if (!showSignatureDetails) {
+        return {
+            label: 'Tanda Tangan',
+            value: `${result.signatures.length} eksternal`,
+            description: 'Ditemukan, tetapi bukan bukti resmi DOCChain.',
+            tone: 'blue',
+            icon: Fingerprint,
+        };
+    }
+
+    if (result.signatures.some((signature) => signature.integrityStatus === 'MODIFIED')) {
+        return {
+            label: 'Tanda Tangan',
+            value: 'Bermasalah',
+            description: 'Ada tanda tangan yang menunjukkan perubahan file.',
+            tone: 'red',
+            icon: Fingerprint,
+        };
+    }
+
+    if (result.signatures.some((signature) => signature.integrityStatus === 'CANNOT_VERIFY')) {
+        return {
+            label: 'Tanda Tangan',
+            value: 'Perlu cek',
+            description: 'Tanda tangan terbaca, tetapi belum bisa dipastikan penuh.',
+            tone: 'amber',
+            icon: Fingerprint,
+        };
+    }
+
+    return {
+        label: 'Tanda Tangan',
+        value: 'Utuh',
+        description: `${result.signatures.length} tanda tangan digital terbaca.`,
+        tone: 'emerald',
+        icon: Fingerprint,
+    };
+}
+
+function getSourceSummary(result: InspectResult, showSignatureDetails: boolean): SummaryItem {
+    if (result.dbMatch.found || result.verification.registeredOnBlockchain) {
+        return {
+            label: 'Sumber File',
+            value: 'DOCChain',
+            description: 'File cocok dengan data sistem atau blockchain DOCChain.',
+            tone: 'emerald',
+            icon: FileText,
+        };
+    }
+
+    if (showSignatureDetails) {
+        return {
+            label: 'Sumber File',
+            value: 'Terindikasi DOCChain',
+            description: 'Ada tanda tangan DOCChain, tetapi hash final tidak cocok.',
+            tone: 'amber',
+            icon: FileText,
+        };
+    }
+
+    return {
+        label: 'Sumber File',
+        value: 'Bukan DOCChain',
+        description: 'Tidak ada catatan resmi pada database atau blockchain.',
+        tone: 'slate',
+        icon: FileText,
+    };
+}
+
+function getHumanExplanation(result: InspectResult, showSignatureDetails: boolean) {
+    if (result.overallStatus === 'VALID') {
+        return 'File ini cocok dengan hash dokumen final DOCChain, tercatat aktif di blockchain, dan tanda tangan digitalnya tidak menunjukkan perubahan.';
+    }
+
+    if (result.overallStatus === 'REVOKED') {
+        return 'Dokumen ini pernah tercatat sebagai dokumen final, tetapi sudah dicabut. Dokumen tidak boleh digunakan sebagai dokumen aktif.';
+    }
+
+    if (result.overallStatus === 'MODIFIED') {
+        return 'File yang diunggah tidak sama dengan dokumen final resmi DOCChain atau tanda tangan DOCChain menunjukkan masalah integritas.';
+    }
+
+    if (result.overallStatus === 'NOT_RECORDED' && result.signatures.length > 0 && !showSignatureDetails) {
+        return 'File ini memiliki tanda tangan digital, tetapi tidak tercatat sebagai dokumen final DOCChain. Sistem tidak menyimpulkan dokumen ini dimodifikasi oleh DOCChain, hanya menyatakan tidak terdaftar.';
+    }
+
+    if (result.overallStatus === 'NOT_RECORDED') {
+        return 'Hash file tidak ditemukan pada catatan DOCChain. File belum dapat dinyatakan sebagai dokumen final resmi DOCChain.';
+    }
+
+    if (result.overallStatus === 'NO_SIGNATURES') {
+        return 'Hash file ditemukan, tetapi PDF tidak memiliki tanda tangan digital yang dapat dibaca.';
+    }
+
+    return 'Sebagian bukti verifikasi ditemukan, tetapi ada informasi tanda tangan yang perlu diperiksa kembali.';
+}
+
 function DropZone({
     onFile,
     loading,
@@ -576,6 +811,65 @@ function OverallStatusBanner({ result }: { result: InspectResult }) {
 
 /* ── DB Match Card ────────────────────────────────────── */
 
+function SummaryTile({ item }: { item: SummaryItem }) {
+    const Icon = item.icon;
+
+    return (
+        <div className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3">
+            <div className="flex items-start gap-3">
+                <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border ${summaryToneClass[item.tone]}`}>
+                    <Icon className="h-4 w-4" />
+                </div>
+                <div className="min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{item.label}</p>
+                    <p className="mt-0.5 text-sm font-bold text-slate-950">{item.value}</p>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">{item.description}</p>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function VerificationSummaryCard({
+    result,
+    showSignatureDetails,
+}: {
+    result: InspectResult;
+    showSignatureDetails: boolean;
+}) {
+    const items = [
+        getDecisionSummary(result),
+        getHashSummary(result),
+        getBlockchainSummary(result),
+        getSignatureSummary(result, showSignatureDetails),
+        getSourceSummary(result, showSignatureDetails),
+    ];
+
+    return (
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-2 border-b border-slate-100 pb-4 md:flex-row md:items-start md:justify-between">
+                <div>
+                    <p className="text-xs font-bold uppercase tracking-wider text-blue-700">Ringkasan Verifikasi</p>
+                    <h2 className="mt-1 text-lg font-bold text-slate-950">Apa arti hasil ini?</h2>
+                </div>
+                <div className={`w-fit rounded-full border px-3 py-1 text-xs font-bold ${result.verification.verified ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>
+                    {result.verification.verified ? 'Dapat dipercaya' : 'Tidak dapat diverifikasi'}
+                </div>
+            </div>
+
+            <p className="mt-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm leading-6 text-slate-700">
+                {getHumanExplanation(result, showSignatureDetails)}
+            </p>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {items.map((item) => (
+                    <SummaryTile key={item.label} item={item} />
+                ))}
+            </div>
+        </div>
+    );
+}
+
 function DbMatchCard({ match }: { match: DbMatchResult }) {
     if (!match.found) {
         return (
@@ -711,8 +1005,8 @@ function TechnicalDetailsCard({
                 <div className="flex items-center gap-2">
                     <Fingerprint className="h-4 w-4 text-slate-500" />
                     <div>
-                        <p className="text-sm font-bold text-slate-900">Detail teknis verifikasi</p>
-                        <p className="text-xs text-slate-500">Hash, IPFS, contract, issuer, dan data teknis lain.</p>
+                        <p className="text-sm font-bold text-slate-900">Detail teknis opsional</p>
+                        <p className="text-xs text-slate-500">Hash, IPFS, contract, issuer, dan data audit lanjutan.</p>
                     </div>
                 </div>
                 {expanded ? (
@@ -895,41 +1189,40 @@ export default function VerifyDocumentPage() {
 
                             return (
                                 <>
-                        {/* Overall status */}
-                        <OverallStatusBanner result={result} />
+                                    {/* Overall status */}
+                                    <OverallStatusBanner result={result} />
 
-                        {(result.dbMatch.found || result.verification.registeredOnBlockchain || showSignatureDetails) && (
-                            <>
-                                {/* DB match */}
-                                <DbMatchCard match={result.dbMatch} />
+                                    <VerificationSummaryCard
+                                        result={result}
+                                        showSignatureDetails={showSignatureDetails}
+                                    />
 
-                                {/* Blockchain match */}
-                                <BlockchainCard record={result.blockchain} fileHash={result.fileHash} />
-                            </>
-                        )}
+                                    {showExternalNotice && (
+                                        <ExternalDocumentNotice signatureCount={result.signatures.length} />
+                                    )}
 
-                        {/* File metadata */}
-                        <FileMetaCard result={result} fileName={fileName} />
+                                    {(result.dbMatch.found || result.verification.registeredOnBlockchain || showSignatureDetails) && (
+                                        <>
+                                            <DbMatchCard match={result.dbMatch} />
+                                            <BlockchainCard record={result.blockchain} fileHash={result.fileHash} />
+                                        </>
+                                    )}
 
-                        {/* Technical details */}
-                        <TechnicalDetailsCard result={result} />
+                                    <FileMetaCard result={result} fileName={fileName} />
 
-                        {showExternalNotice && (
-                            <ExternalDocumentNotice signatureCount={result.signatures.length} />
-                        )}
+                                    {showSignatureDetails && result.signatures.length > 0 && (
+                                        <div className="space-y-4">
+                                            <h2 className="flex items-center gap-2 text-sm font-bold text-slate-700">
+                                                <Fingerprint className="h-4 w-4 text-blue-700" />
+                                                Tanda Tangan Digital ({result.signatures.length})
+                                            </h2>
+                                            {result.signatures.map((sig, i) => (
+                                                <SignaturePanel key={i} sig={sig} index={i} />
+                                            ))}
+                                        </div>
+                                    )}
 
-                        {/* Signature panels */}
-                        {showSignatureDetails && result.signatures.length > 0 && (
-                            <div className="space-y-4">
-                                <h2 className="flex items-center gap-2 text-sm font-bold text-slate-700">
-                                    <Fingerprint className="h-4 w-4 text-blue-700" />
-                                    Tanda Tangan Digital ({result.signatures.length})
-                                </h2>
-                                {result.signatures.map((sig, i) => (
-                                    <SignaturePanel key={i} sig={sig} index={i} />
-                                ))}
-                            </div>
-                        )}
+                                    <TechnicalDetailsCard result={result} />
                                 </>
                             );
                         })()}

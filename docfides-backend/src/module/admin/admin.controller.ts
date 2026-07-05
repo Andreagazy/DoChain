@@ -7,6 +7,7 @@ import { AdminService } from './admin.service';
 import { CreateAdminUserDto, ResetAdminUserPasswordDto, UpdateAdminUserDto } from './dto/update-admin-user.dto';
 import { CreateAcademicUnitDto, UpdateAcademicUnitDto } from './dto/manage-academic-unit.dto';
 import { RevokeDocumentDto } from './dto/revoke-document.dto';
+import { ReviewDocumentRevokeRequestDto } from './dto/review-document-revoke-request.dto';
 import { ReviewIdentityDto } from '../identity/dto/review-identity.dto';
 
 type RequestWithUser = Request & {
@@ -165,5 +166,45 @@ export class AdminController {
     @Body() dto: RevokeDocumentDto,
   ) {
     return this.adminService.revokeDocument(req.user.userId, documentId, dto);
+  }
+
+  @Get('document-revoke-requests')
+  @Roles('SUPERADMIN')
+  listDocumentRevokeRequests() {
+    return this.adminService.listDocumentRevokeRequests();
+  }
+
+  @Get('document-revoke-requests/:requestId/evidences/:evidenceId')
+  @Roles('SUPERADMIN')
+  async getDocumentRevokeEvidence(
+    @Param('requestId') requestId: string,
+    @Param('evidenceId') evidenceId: string,
+    @Res() res: Response,
+  ) {
+    const file = await this.adminService.getDocumentRevokeEvidence(
+      requestId,
+      evidenceId,
+    );
+
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader(
+      'Content-Disposition',
+      `inline; filename="${file.fileName}"`,
+    );
+    res.send(file.content);
+  }
+
+  @Patch('document-revoke-requests/:requestId/review')
+  @Roles('SUPERADMIN')
+  reviewDocumentRevokeRequest(
+    @Req() req: RequestWithUser,
+    @Param('requestId') requestId: string,
+    @Body() dto: ReviewDocumentRevokeRequestDto,
+  ) {
+    return this.adminService.reviewDocumentRevokeRequest(
+      req.user.userId,
+      requestId,
+      dto,
+    );
   }
 }

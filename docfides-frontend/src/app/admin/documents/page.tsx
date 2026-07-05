@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertCircle, CheckCircle2, Eye, FileText, Info, Loader2, Search, XCircle } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Eye, FileText, ImageIcon, Info, Loader2, Search, XCircle } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { AdminPagination } from '@/components/common/admin-pagination';
 import { AppShell } from '@/components/layout/app-shell';
@@ -11,9 +11,9 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
-import { getAdminDocumentFile, getUser, listAdminDocuments, revokeAdminDocument } from '@/lib/auth-service';
+import { getAdminDocumentFile, getAdminDocumentRevokeEvidence, getUser, listAdminDocumentRevokeRequests, listAdminDocuments, reviewAdminDocumentRevokeRequest, revokeAdminDocument } from '@/lib/auth-service';
 import { normalizeErrorMessage } from '@/lib/certification-flow';
-import type { AdminDocumentsResponse } from '@/types/auth';
+import type { AdminDocumentRevokeRequestItem, AdminDocumentsResponse } from '@/types/auth';
 
 type AdminDocument = AdminDocumentsResponse['documents'][number];
 const pageSize = 8;
@@ -28,6 +28,7 @@ export default function AdminDocumentsPage() {
     const router = useRouter();
     const [loading, setLoading] = useState(true);
     const [documents, setDocuments] = useState<AdminDocument[]>([]);
+    const [revokeRequests, setRevokeRequests] = useState<AdminDocumentRevokeRequestItem[]>([]);
     const [revokingDocumentId, setRevokingDocumentId] = useState('');
     const [query, setQuery] = useState('');
     const [statusFilter, setStatusFilter] = useState('ALL');
@@ -37,6 +38,7 @@ export default function AdminDocumentsPage() {
     const [revokeDialog, setRevokeDialog] = useState<RevokeDialogState | null>(null);
     const [previewDialog, setPreviewDialog] = useState<{ document: AdminDocument; url: string; loading: boolean; error: string } | null>(null);
     const [infoDialog, setInfoDialog] = useState<AdminDocument | null>(null);
+    const [reviewingRequestId, setReviewingRequestId] = useState('');
     const currentUser = useMemo(() => getUser(), []);
 
     useEffect(() => {
@@ -47,8 +49,14 @@ export default function AdminDocumentsPage() {
             }
 
             try {
-                const response = await listAdminDocuments();
+                const [response, revokeRequestResponse] = await Promise.all([
+                    listAdminDocuments(),
+                    currentUser?.role === 'SUPERADMIN'
+                        ? listAdminDocumentRevokeRequests()
+                        : Promise.resolve({ requests: [] }),
+                ]);
                 setDocuments(response.documents);
+                setRevokeRequests(revokeRequestResponse.requests);
             } catch (err) {
                 setError(normalizeErrorMessage(err));
             } finally {
@@ -60,6 +68,7 @@ export default function AdminDocumentsPage() {
     }, [currentUser?.role, router]);
 
     const documentStatuses = useMemo(() => Array.from(new Set(documents.map((document) => document.status))), [documents]);
+    const pendingRevokeRequests = revokeRequests.filter((request) => request.status === 'PENDING');
     const filteredDocuments = useMemo(() => {
         const normalizedQuery = query.trim().toLowerCase();
         return documents.filter((document) => {
@@ -118,6 +127,59 @@ export default function AdminDocumentsPage() {
     const openRevokeDialog = (document: AdminDocument) => {
         handleClosePreview();
         setRevokeDialog({ document, reason: '', step: 'reason', confirmed: false });
+    };
+
+    const refreshAdminDocuments = async () => {
+        const [documentResponse, requestResponse] = await Promise.all([
+            listAdminDocuments(),
+            currentUser?.role === 'SUPERADMIN'
+                ? listAdminDocumentRevokeRequests()
+                : Promise.resolve({ requests: [] }),
+        ]);
+        setDocuments(documentResponse.documents);
+        setRevokeRequests(requestResponse.requests);
+    };
+
+    const handleOpenEvidence = async (requestId: string, evidenceId: string) => {
+        setError('');
+        try {
+            const blob = await getAdminDocumentRevokeEvidence(requestId, evidenceId);
+            const url = URL.createObjectURL(blob);
+            window.open(url, '_blank', 'noopener,noreferrer');
+            window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+        } catch (err) {
+            setError(normalizeErrorMessage(err));
+        }
+    };
+
+    const handleReviewRevokeRequest = async (
+        request: AdminDocumentRevokeRequestItem,
+        status: 'APPROVED' | 'REJECTED',
+    ) => {
+        const reviewNote = status === 'REJECTED'
+            ? window.prompt('Tuliskan alasan penolakan request pencabutan:')
+            : window.prompt('Catatan approval (opsional):');
+
+        if (status === 'REJECTED' && (!reviewNote || reviewNote.trim().length < 5)) {
+            setError('Alasan penolakan minimal 5 karakter.');
+            return;
+        }
+
+        setError('');
+        setSuccess('');
+        setReviewingRequestId(request.id);
+        try {
+            const result = await reviewAdminDocumentRevokeRequest(request.id, {
+                status,
+                ...(reviewNote?.trim() ? { reviewNote: reviewNote.trim() } : {}),
+            });
+            setSuccess(result.message);
+            await refreshAdminDocuments();
+        } catch (err) {
+            setError(normalizeErrorMessage(err));
+        } finally {
+            setReviewingRequestId('');
+        }
     };
 
     const handleContinueRevoke = () => {
@@ -216,6 +278,97 @@ export default function AdminDocumentsPage() {
                         </CardContent>
                     </Card>
                 </div>
+
+                {currentUser?.role === 'SUPERADMIN' ? (
+                    <Card className="border-red-100 bg-white shadow-sm">
+                        <CardHeader>
+                            <CardTitle className="flex items-center gap-2">
+                                <XCircle className="h-5 w-5 text-red-600" />
+                                Request Pencabutan Dokumen
+                            </CardTitle>
+                            <CardDescription>
+                                Review pengajuan pencabutan dari owner atau signer dokumen. Bukti minimal 2 gambar.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent className="p-0">
+                            {pendingRevokeRequests.length === 0 ? (
+                                <div className="px-5 py-8 text-center text-sm text-slate-500">
+                                    Tidak ada request pencabutan yang menunggu review.
+                                </div>
+                            ) : (
+                                <div className="overflow-x-auto">
+                                    <table className="w-full min-w-[980px] text-left text-sm">
+                                        <thead className="border-y border-red-100 bg-red-50 text-xs uppercase text-slate-500">
+                                            <tr>
+                                                <th className="px-4 py-3 font-medium">Dokumen</th>
+                                                <th className="px-4 py-3 font-medium">Pengaju</th>
+                                                <th className="px-4 py-3 font-medium">Alasan</th>
+                                                <th className="px-4 py-3 font-medium">Bukti</th>
+                                                <th className="px-4 py-3 text-right font-medium">Aksi</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody className="divide-y divide-red-100">
+                                            {pendingRevokeRequests.map((request) => (
+                                                <tr key={request.id} className="bg-white align-top hover:bg-red-50/30">
+                                                    <td className="px-4 py-3">
+                                                        <p className="font-semibold text-slate-900">{request.document.originalFileName ?? request.document.id}</p>
+                                                        <p className="mt-0.5 text-xs text-slate-500">Status: {request.document.status}</p>
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <p className="font-medium text-slate-900">{request.requester.identity?.fullName ?? request.requester.displayName ?? request.requester.email}</p>
+                                                        <p className="mt-0.5 text-xs text-slate-500">{request.requester.email}</p>
+                                                    </td>
+                                                    <td className="px-4 py-3 max-w-sm">
+                                                        <p className="line-clamp-3 text-slate-700">{request.reason}</p>
+                                                        <p className="mt-1 text-xs text-slate-500">{new Date(request.createdAt).toLocaleString('id-ID')}</p>
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <div className="flex flex-wrap gap-2">
+                                                            {request.evidences.map((evidence, index) => (
+                                                                <Button
+                                                                    key={evidence.id}
+                                                                    size="sm"
+                                                                    variant="outline"
+                                                                    className="border-slate-300"
+                                                                    onClick={() => void handleOpenEvidence(request.id, evidence.id)}
+                                                                >
+                                                                    <ImageIcon className="h-4 w-4" />
+                                                                    Bukti {index + 1}
+                                                                </Button>
+                                                            ))}
+                                                        </div>
+                                                    </td>
+                                                    <td className="px-4 py-3">
+                                                        <div className="flex justify-end gap-2">
+                                                            <Button
+                                                                size="sm"
+                                                                className="bg-emerald-600 hover:bg-emerald-500"
+                                                                disabled={reviewingRequestId === request.id}
+                                                                onClick={() => void handleReviewRevokeRequest(request, 'APPROVED')}
+                                                            >
+                                                                {reviewingRequestId === request.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
+                                                                Setujui
+                                                            </Button>
+                                                            <Button
+                                                                size="sm"
+                                                                variant="destructive"
+                                                                disabled={reviewingRequestId === request.id}
+                                                                onClick={() => void handleReviewRevokeRequest(request, 'REJECTED')}
+                                                            >
+                                                                <XCircle className="h-4 w-4" />
+                                                                Tolak
+                                                            </Button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+                ) : null}
 
                 <Card className="border-slate-200 bg-white shadow-sm">
                     <CardHeader>

@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { AxiosError } from 'axios';
 import { AlertCircle, Eye, EyeOff, GraduationCap, Hash, Loader2, Lock, Mail, User } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -16,11 +15,8 @@ import {
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { getRegisterOptions, register, saveAuthData } from '@/lib/auth-service';
+import { normalizeErrorMessage } from '@/lib/certification-flow';
 import type { RegisterOptionsResponse } from '@/types/auth';
-
-type ApiError = {
-    message?: string | string[];
-};
 
 interface CompleteRegistrationFormProps {
     email: string;
@@ -60,14 +56,6 @@ export default function CompleteRegistrationForm({ email }: CompleteRegistration
 
         void loadOptions();
     }, []);
-
-    const normalizeErrorMessage = (err: unknown) => {
-        const error = err as AxiosError<ApiError>;
-        const responseMessage = error.response?.data?.message;
-        return Array.isArray(responseMessage)
-            ? responseMessage.join(', ')
-            : responseMessage ?? error.message ?? 'Registrasi gagal. Silakan coba lagi.';
-    };
 
     const validateForm = (): boolean => {
         if (displayName.trim().length < 2) {
