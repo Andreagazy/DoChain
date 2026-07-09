@@ -173,14 +173,14 @@ export default function DocumentsPage() {
         setError('');
         setNotice('');
 
-        try {
-            if (doc.finalFileIpfsHash) {
-                const blob = await getIpfsFile(doc.finalFileIpfsHash);
-                triggerDownload(blob, buildSignedDownloadName(doc));
-                return;
-            }
+        if (!doc.finalFileIpfsHash) {
+            setError('CID IPFS dokumen final belum tersedia. File final hanya bisa diunduh dari IPFS setelah dokumen selesai dan berhasil dicatat ke IPFS.');
+            return;
+        }
 
-            throw new Error('CID IPFS dokumen belum tersedia');
+        try {
+            const blob = await getIpfsFile(doc.finalFileIpfsHash);
+            triggerDownload(blob, buildSignedDownloadName(doc));
         } catch {
             try {
                 const fallbackBlob = await getCertificationDocumentSignedFile(doc.id);

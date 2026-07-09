@@ -27,6 +27,10 @@ export function DocumentTable({
     onDeleteDraft,
     deletingDocumentId = '',
 }: DocumentTableProps) {
+    const canDownloadFinalFromIpfs = (doc: OwnedDocumentItem) =>
+        Boolean(doc.finalFileIpfsHash) &&
+        (doc.status === 'FULLY_SIGNED' || doc.status === 'REVOKED');
+
     const getActionHref = (doc: OwnedDocumentItem) => {
         if (doc.accessType === 'SIGNER') {
             return '/certification/assigned';
@@ -106,7 +110,7 @@ export function DocumentTable({
                                             <Button variant="outline" className="h-8 border-slate-200/80 hover:bg-indigo-50/50 hover:text-indigo-600 hover:border-indigo-200/60 rounded-lg text-xs font-semibold shadow-xs transition-all" size="sm" onClick={() => onDownloadOriginal(doc)} title="Unduh dokumen asli">
                                                 <Download className="h-3.5 w-3.5" /> Asli
                                             </Button>
-                                            {doc.finalFileName || doc.finalFileIpfsHash || doc.finalFileIpfsGatewayUrl ? (
+                                            {canDownloadFinalFromIpfs(doc) ? (
                                                 <Button
                                                     variant="outline"
                                                     className="h-8 border-slate-200/80 hover:bg-emerald-50/50 hover:text-emerald-600 hover:border-emerald-200/60 rounded-lg text-xs font-semibold shadow-xs transition-all"
