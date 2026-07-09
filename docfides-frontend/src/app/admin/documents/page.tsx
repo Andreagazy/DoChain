@@ -24,6 +24,13 @@ type RevokeDialogState = {
     confirmed: boolean;
 };
 
+type ReviewRevokeRequestDialogState = {
+    request: AdminDocumentRevokeRequestItem;
+    status: 'APPROVED' | 'REJECTED';
+    reviewNote: string;
+    confirmed: boolean;
+};
+
 export default function AdminDocumentsPage() {
     const router = useRouter();
     const [loading, setLoading] = useState(true);
@@ -38,6 +45,7 @@ export default function AdminDocumentsPage() {
     const [revokeDialog, setRevokeDialog] = useState<RevokeDialogState | null>(null);
     const [previewDialog, setPreviewDialog] = useState<{ document: AdminDocument; url: string; loading: boolean; error: string } | null>(null);
     const [infoDialog, setInfoDialog] = useState<AdminDocument | null>(null);
+    const [reviewDialog, setReviewDialog] = useState<ReviewRevokeRequestDialogState | null>(null);
     const [reviewingRequestId, setReviewingRequestId] = useState('');
     const currentUser = useMemo(() => getUser(), []);
 
@@ -152,16 +160,34 @@ export default function AdminDocumentsPage() {
         }
     };
 
-    const handleReviewRevokeRequest = async (
+    const openReviewRevokeRequestDialog = (
         request: AdminDocumentRevokeRequestItem,
         status: 'APPROVED' | 'REJECTED',
     ) => {
-        const reviewNote = status === 'REJECTED'
-            ? window.prompt('Tuliskan alasan penolakan request pencabutan:')
-            : window.prompt('Catatan approval (opsional):');
+        setError('');
+        setReviewDialog({
+            request,
+            status,
+            reviewNote: '',
+            confirmed: false,
+        });
+    };
 
-        if (status === 'REJECTED' && (!reviewNote || reviewNote.trim().length < 5)) {
+    const handleReviewRevokeRequest = async () => {
+        if (!reviewDialog) {
+            return;
+        }
+
+        const { request, status } = reviewDialog;
+        const reviewNote = reviewDialog.reviewNote.trim();
+
+        if (status === 'REJECTED' && reviewNote.length < 5) {
             setError('Alasan penolakan minimal 5 karakter.');
+            return;
+        }
+
+        if (!reviewDialog.confirmed) {
+            setError('Centang konfirmasi review terlebih dahulu.');
             return;
         }
 
@@ -171,9 +197,10 @@ export default function AdminDocumentsPage() {
         try {
             const result = await reviewAdminDocumentRevokeRequest(request.id, {
                 status,
-                ...(reviewNote?.trim() ? { reviewNote: reviewNote.trim() } : {}),
+                ...(reviewNote ? { reviewNote } : {}),
             });
             setSuccess(result.message);
+            setReviewDialog(null);
             await refreshAdminDocuments();
         } catch (err) {
             setError(normalizeErrorMessage(err));
@@ -344,7 +371,7 @@ export default function AdminDocumentsPage() {
                                                                 size="sm"
                                                                 className="bg-emerald-600 hover:bg-emerald-500"
                                                                 disabled={reviewingRequestId === request.id}
-                                                                onClick={() => void handleReviewRevokeRequest(request, 'APPROVED')}
+                                                                onClick={() => openReviewRevokeRequestDialog(request, 'APPROVED')}
                                                             >
                                                                 {reviewingRequestId === request.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                                                                 Setujui
@@ -353,7 +380,7 @@ export default function AdminDocumentsPage() {
                                                                 size="sm"
                                                                 variant="destructive"
                                                                 disabled={reviewingRequestId === request.id}
-                                                                onClick={() => void handleReviewRevokeRequest(request, 'REJECTED')}
+                                                                onClick={() => openReviewRevokeRequestDialog(request, 'REJECTED')}
                                                             >
                                                                 <XCircle className="h-4 w-4" />
                                                                 Tolak
@@ -456,6 +483,80 @@ export default function AdminDocumentsPage() {
                         <AdminPagination page={safePage} pageSize={pageSize} totalItems={filteredDocuments.length} onPageChange={setPage} />
                     </CardContent>
                 </Card>
+
+                <Dialog open={Boolean(reviewDialog)} onOpenChange={(open) => !open && setReviewDialog(null)}>
+                    <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>
+                                {reviewDialog?.status === 'APPROVED' ? 'Setujui Request Pencabutan' : 'Tolak Request Pencabutan'}
+                            </DialogTitle>
+                            <DialogDescription>
+                                Review alasan dan bukti pengaju sebelum mengambil keputusan. Approval akan mencabut dokumen final.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-3">
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-sm">
+                                <p className="text-xs font-bold uppercase tracking-wide text-slate-500">Dokumen</p>
+                                <p className="mt-1 font-semibold text-slate-900">{reviewDialog?.request.document.originalFileName ?? reviewDialog?.request.document.id ?? '-'}</p>
+                                <p className="mt-1 text-xs text-slate-500">Status saat ini: {reviewDialog?.request.document.status ?? '-'}</p>
+                            </div>
+                            <div className="rounded-xl border border-amber-100 bg-amber-50 p-3 text-sm text-amber-900">
+                                <p className="text-xs font-bold uppercase tracking-wide text-amber-700">Alasan pengaju</p>
+                                <p className="mt-1 whitespace-pre-wrap">{reviewDialog?.request.reason ?? '-'}</p>
+                                <p className="mt-2 text-xs">{reviewDialog?.request.evidences.length ?? 0} bukti gambar terlampir.</p>
+                            </div>
+                            <div className="space-y-1.5">
+                                <label className="text-sm font-semibold text-slate-700" htmlFor="review-revoke-note">
+                                    {reviewDialog?.status === 'REJECTED' ? 'Alasan penolakan' : 'Catatan approval'}
+                                    {reviewDialog?.status === 'REJECTED' ? <span className="text-red-600"> *</span> : null}
+                                </label>
+                                <textarea
+                                    id="review-revoke-note"
+                                    value={reviewDialog?.reviewNote ?? ''}
+                                    onChange={(event) => setReviewDialog((current) => current ? { ...current, reviewNote: event.target.value.slice(0, 500) } : current)}
+                                    className="min-h-24 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
+                                    placeholder={reviewDialog?.status === 'REJECTED' ? 'Tuliskan alasan kenapa request pencabutan ditolak.' : 'Opsional, contoh: Bukti sesuai dan dokumen akan dicabut.'}
+                                />
+                                <p className="text-xs text-slate-500">
+                                    {reviewDialog?.status === 'REJECTED'
+                                        ? 'Alasan penolakan minimal 5 karakter.'
+                                        : 'Catatan approval boleh dikosongkan.'}
+                                </p>
+                            </div>
+                            <label className="flex items-start gap-2 rounded-md border border-slate-200 p-3 text-sm text-slate-700">
+                                <input
+                                    type="checkbox"
+                                    checked={reviewDialog?.confirmed ?? false}
+                                    onChange={(event) => setReviewDialog((current) => current ? { ...current, confirmed: event.target.checked } : current)}
+                                    className="mt-1 h-4 w-4"
+                                />
+                                <span>
+                                    {reviewDialog?.status === 'APPROVED'
+                                        ? 'Saya sudah memeriksa alasan dan bukti, serta menyetujui pencabutan dokumen ini.'
+                                        : 'Saya sudah memeriksa alasan dan bukti, serta menolak request pencabutan ini.'}
+                                </span>
+                            </label>
+                        </div>
+                        <DialogFooter>
+                            <Button variant="outline" className="border-slate-300" onClick={() => setReviewDialog(null)} disabled={reviewingRequestId !== ''}>
+                                Batal
+                            </Button>
+                            <Button
+                                className={reviewDialog?.status === 'APPROVED' ? 'bg-emerald-600 hover:bg-emerald-500' : ''}
+                                variant={reviewDialog?.status === 'REJECTED' ? 'destructive' : 'default'}
+                                onClick={() => void handleReviewRevokeRequest()}
+                                disabled={
+                                    reviewingRequestId !== '' ||
+                                    !reviewDialog?.confirmed ||
+                                    (reviewDialog?.status === 'REJECTED' && reviewDialog.reviewNote.trim().length < 5)
+                                }
+                            >
+                                {reviewingRequestId ? <Loader2 className="h-4 w-4 animate-spin" /> : reviewDialog?.status === 'APPROVED' ? <CheckCircle2 className="h-4 w-4" /> : <XCircle className="h-4 w-4" />}
+                                {reviewDialog?.status === 'APPROVED' ? 'Ya, Setujui' : 'Ya, Tolak'}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
 
                 <Dialog open={Boolean(infoDialog)} onOpenChange={(open) => !open && setInfoDialog(null)}>
                     <DialogContent className="sm:max-w-lg">

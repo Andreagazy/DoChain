@@ -59,6 +59,7 @@ function CertificationReviewContent() {
     const [signerDetailsLoading, setSignerDetailsLoading] = useState(false);
     const [documentSignerDetails, setDocumentSignerDetails] = useState<Awaited<ReturnType<typeof getDocumentSignerPlaceholders>> | null>(null);
     const [signConfirmOpen, setSignConfirmOpen] = useState(false);
+    const [signPlaceholderConfirmed, setSignPlaceholderConfirmed] = useState(false);
     const [selectedDocumentPreviewUrl, setSelectedDocumentPreviewUrl] = useState('');
     const [selectedDocumentPreviewBlob, setSelectedDocumentPreviewBlob] = useState<Blob | null>(null);
     const [previewLoading, setPreviewLoading] = useState(false);
@@ -91,6 +92,31 @@ function CertificationReviewContent() {
         currentUser?.id &&
         documentSignerDetails?.signers.some((signer) => signer.userId === currentUser.id),
     );
+    const currentUserSigner = useMemo(
+        () => documentSignerDetails?.signers.find((signer) => signer.userId === currentUser?.id) ?? null,
+        [currentUser?.id, documentSignerDetails?.signers],
+    );
+    const currentUserPlaceholder = useMemo<PlaceholderConfig | null>(() => {
+        const placeholder = currentUserSigner?.placeholder;
+        if (
+            !placeholder ||
+            placeholder.visiblePage === null ||
+            placeholder.visibleX === null ||
+            placeholder.visibleY === null ||
+            placeholder.visibleWidth === null ||
+            placeholder.visibleHeight === null
+        ) {
+            return null;
+        }
+
+        return {
+            visiblePage: placeholder.visiblePage,
+            visibleX: placeholder.visibleX,
+            visibleY: placeholder.visibleY,
+            visibleWidth: placeholder.visibleWidth,
+            visibleHeight: placeholder.visibleHeight,
+        };
+    }, [currentUserSigner?.placeholder]);
     const canShowSignAction =
         Boolean(selectedDocument) &&
         !isFullySigned &&
@@ -210,7 +236,14 @@ function CertificationReviewContent() {
 
     useEffect(() => {
         setQrCodePlacement(null);
+        setSignPlaceholderConfirmed(false);
     }, [selectedDocumentId]);
+
+    useEffect(() => {
+        if (!signConfirmOpen) {
+            setSignPlaceholderConfirmed(false);
+        }
+    }, [signConfirmOpen]);
 
     useEffect(() => {
         let objectUrl = '';
@@ -223,7 +256,7 @@ function CertificationReviewContent() {
             setSelectedDocumentPreviewBlob(null);
             setPreviewPdfDocument(null);
 
-            if (!selectedDocumentId || !canPlaceQrBeforeSigning) {
+            if (!selectedDocumentId || (!canPlaceQrBeforeSigning && !signConfirmOpen)) {
                 setSelectedDocumentPreviewUrl('');
                 return;
             }
@@ -249,7 +282,7 @@ function CertificationReviewContent() {
                 URL.revokeObjectURL(objectUrl);
             }
         };
-    }, [selectedDocumentId, canPlaceQrBeforeSigning]);
+    }, [selectedDocumentId, canPlaceQrBeforeSigning, signConfirmOpen]);
 
     useEffect(() => {
         let cancelled = false;
@@ -349,7 +382,7 @@ function CertificationReviewContent() {
             cancelled = true;
             activeRenderTask?.cancel();
         };
-    }, [previewPdfDocument, previewPage]);
+    }, [previewPdfDocument, previewPage, previewLoading]);
 
     const qrOverlayBox = useMemo(() => {
         if (!renderedPageSize || !qrCodePlacement || qrCodePlacement.visiblePage !== previewPage) {
@@ -366,6 +399,22 @@ function CertificationReviewContent() {
             height: qrCodePlacement.visibleHeight * scaleY,
         };
     }, [previewPage, qrCodePlacement, renderedPageSize]);
+
+    const signOverlayBox = useMemo(() => {
+        if (!renderedPageSize || !currentUserPlaceholder || currentUserPlaceholder.visiblePage !== previewPage) {
+            return null;
+        }
+
+        const scaleX = renderedPageSize.viewWidth / renderedPageSize.pdfWidth;
+        const scaleY = renderedPageSize.viewHeight / renderedPageSize.pdfHeight;
+
+        return {
+            left: currentUserPlaceholder.visibleX * scaleX,
+            top: (renderedPageSize.pdfHeight - (currentUserPlaceholder.visibleY + currentUserPlaceholder.visibleHeight)) * scaleY,
+            width: currentUserPlaceholder.visibleWidth * scaleX,
+            height: currentUserPlaceholder.visibleHeight * scaleY,
+        };
+    }, [currentUserPlaceholder, previewPage, renderedPageSize]);
 
     const handleQrPickPosition = (event: MouseEvent<HTMLCanvasElement>) => {
         if (!canPlaceQrBeforeSigning) {
@@ -429,14 +478,31 @@ function CertificationReviewContent() {
             return;
         }
 
+        if (!currentUserPlaceholder) {
+            setError('Placeholder tanda tangan Anda belum tersedia. Kembali ke langkah Placeholder untuk mengatur posisi tanda tangan.');
+            return;
+        }
+
+        setPreviewPage(currentUserPlaceholder.visiblePage);
+        setSignPlaceholderConfirmed(false);
         setSignConfirmOpen(true);
     };
 
     const handleOwnerSign = async () => {
+        if (!currentUserPlaceholder || !signPlaceholderConfirmed) {
+            setError('Klik area placeholder tanda tangan Anda pada preview dokumen terlebih dahulu.');
+            return;
+        }
+
         await execute('Sign Dokumen', async () => {
             const result = await signDocumentCertification(selectedDocumentId, {
                 mode: 'visible',
                 reason: signingReason,
+                visiblePage: currentUserPlaceholder.visiblePage,
+                visibleX: currentUserPlaceholder.visibleX,
+                visibleY: currentUserPlaceholder.visibleY,
+                visibleWidth: currentUserPlaceholder.visibleWidth,
+                visibleHeight: currentUserPlaceholder.visibleHeight,
             });
 
             setMyDocuments((currentDocuments) =>
@@ -712,36 +778,117 @@ function CertificationReviewContent() {
                 ) : null}
 
                 <Dialog open={signConfirmOpen} onOpenChange={setSignConfirmOpen}>
-                    <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
+                    <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-5xl">
                         <DialogHeader>
                             <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-full bg-blue-50 text-blue-700">
                                 <PenLine className="h-5 w-5" />
                             </div>
                             <DialogTitle>Konfirmasi Tanda Tangan</DialogTitle>
                             <DialogDescription>
-                                Pastikan dokumen sudah benar. Setelah dikonfirmasi, tanda tangan digital Anda akan diterapkan ke dokumen ini.
+                                Tinjau dokumen, klik area placeholder tanda tangan Anda, lalu konfirmasi tanda tangan.
                             </DialogDescription>
                         </DialogHeader>
 
-                        <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
-                            <div>
-                                <p className="text-xs font-semibold uppercase text-slate-500">Dokumen</p>
-                                <p className="mt-1 font-semibold text-slate-900">{selectedDocument?.originalFileName ?? selectedDocument?.finalFileName ?? '-'}</p>
-                            </div>
-                            <div>
-                                <p className="text-xs font-semibold uppercase text-slate-500">Status Signer</p>
-                                <p className="mt-1 text-slate-800">{signedSignerCount} / {totalSignerCount}</p>
-                            </div>
-                        </div>
+                        <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+                            <div className="space-y-3">
+                                <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                                    <p className="text-sm font-semibold text-slate-800">
+                                        {selectedDocument?.originalFileName ?? selectedDocument?.finalFileName ?? 'Dokumen sertifikasi'}
+                                    </p>
+                                    <div className="flex items-center gap-2">
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            className="h-8 border-slate-300 px-3 text-xs"
+                                            onClick={() => setPreviewPage((page) => Math.max(1, page - 1))}
+                                            disabled={previewPage <= 1 || previewLoading}
+                                        >
+                                            Sebelumnya
+                                        </Button>
+                                        <span className="text-xs text-slate-600">{previewPage} / {previewPageCount || 1}</span>
+                                        <Button
+                                            type="button"
+                                            variant="outline"
+                                            className="h-8 border-slate-300 px-3 text-xs"
+                                            onClick={() => setPreviewPage((page) => Math.min(previewPageCount || page, page + 1))}
+                                            disabled={previewPage >= previewPageCount || previewLoading || previewPageCount === 0}
+                                        >
+                                            Berikutnya
+                                        </Button>
+                                    </div>
+                                </div>
 
-                        <div className="flex flex-wrap justify-end gap-2">
-                            <Button variant="outline" className="border-slate-300" onClick={() => setSignConfirmOpen(false)} disabled={loadingAction !== ''}>
-                                Batal
-                            </Button>
-                            <Button className="bg-blue-600 text-white hover:bg-blue-700" onClick={() => void handleOwnerSign()} disabled={loadingAction !== ''}>
-                                {loadingAction === 'Sign Dokumen' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PenLine className="mr-2 h-4 w-4" />}
-                                Ya, Tanda Tangani
-                            </Button>
+                                <div ref={previewContainerRef} className="max-h-[68vh] w-full overflow-auto rounded-xl border border-slate-200 bg-slate-100 p-2">
+                                    {previewLoading ? (
+                                        <div className="flex min-h-[420px] items-center justify-center text-slate-600">
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            Memuat preview dokumen...
+                                        </div>
+                                    ) : previewError ? (
+                                        <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                                            Gagal memuat preview dokumen: {previewError}
+                                        </div>
+                                    ) : (
+                                        <div className="relative mx-auto inline-block">
+                                            <canvas ref={previewCanvasRef} className="block rounded-md bg-white shadow-sm" />
+                                            {signOverlayBox ? (
+                                                <button
+                                                    type="button"
+                                                    aria-label="Konfirmasi area tanda tangan"
+                                                    className={`absolute flex items-center justify-center rounded-sm border-2 text-[11px] font-bold transition ${
+                                                        signPlaceholderConfirmed
+                                                            ? 'border-emerald-600 bg-emerald-100/60 text-emerald-800'
+                                                            : 'border-blue-600 bg-blue-100/45 text-blue-800 hover:bg-blue-200/70'
+                                                    }`}
+                                                    style={{
+                                                        left: `${signOverlayBox.left}px`,
+                                                        top: `${signOverlayBox.top}px`,
+                                                        width: `${signOverlayBox.width}px`,
+                                                        height: `${signOverlayBox.height}px`,
+                                                    }}
+                                                    onClick={() => {
+                                                        setError('');
+                                                        setSignPlaceholderConfirmed(true);
+                                                    }}
+                                                >
+                                                    {signPlaceholderConfirmed ? 'Dipilih' : 'Klik area TTD'}
+                                                </button>
+                                            ) : null}
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-3 text-sm">
+                                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                                    <p className="text-xs font-semibold uppercase text-slate-500">Penandatangan</p>
+                                    <p className="mt-1 font-semibold text-slate-900">{currentUserSigner ? getStoredSignerName(currentUserSigner) : '-'}</p>
+                                    <p className="mt-1 text-xs text-slate-500">{currentUserSigner?.email ?? currentUser?.email ?? '-'}</p>
+                                </div>
+                                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                                    <p className="text-xs font-semibold uppercase text-slate-500">Status Signer</p>
+                                    <p className="mt-1 text-slate-800">{signedSignerCount} / {totalSignerCount}</p>
+                                </div>
+                                <div className={`rounded-lg border p-3 ${signPlaceholderConfirmed ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+                                    <p className="font-semibold">
+                                        {signPlaceholderConfirmed ? 'Area tanda tangan sudah dipilih' : 'Klik placeholder tanda tangan'}
+                                    </p>
+                                    <p className="mt-1 text-xs">
+                                        {currentUserPlaceholder
+                                            ? `Placeholder berada di halaman ${currentUserPlaceholder.visiblePage}.`
+                                            : 'Placeholder tanda tangan belum tersedia.'}
+                                    </p>
+                                </div>
+                                <div className="flex flex-col gap-2 pt-2">
+                                    <Button className="bg-blue-600 text-white hover:bg-blue-700" onClick={() => void handleOwnerSign()} disabled={loadingAction !== '' || !signPlaceholderConfirmed}>
+                                        {loadingAction === 'Sign Dokumen' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PenLine className="mr-2 h-4 w-4" />}
+                                        Ya, Tanda Tangani
+                                    </Button>
+                                    <Button variant="outline" className="border-slate-300" onClick={() => setSignConfirmOpen(false)} disabled={loadingAction !== ''}>
+                                        Batal
+                                    </Button>
+                                </div>
+                            </div>
                         </div>
                     </DialogContent>
                 </Dialog>

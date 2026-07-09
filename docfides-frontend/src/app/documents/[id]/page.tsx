@@ -11,6 +11,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
     getCertificationDocumentDetail,
     getCertificationDocumentFile,
@@ -97,8 +98,10 @@ export default function DocumentDetailPage() {
     const [revokeReason, setRevokeReason] = useState('');
     const [revokeEvidenceFiles, setRevokeEvidenceFiles] = useState<File[]>([]);
     const [submittingRevokeRequest, setSubmittingRevokeRequest] = useState(false);
+    const [revokeConfirmOpen, setRevokeConfirmOpen] = useState(false);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
+    const [success, setSuccess] = useState('');
 
     useEffect(() => {
         let nextPreviewUrl = '';
@@ -154,15 +157,32 @@ export default function DocumentDetailPage() {
         setDetail(detailRes);
     };
 
-    const handleSubmitRevokeRequest = async () => {
+    const validateRevokeRequest = () => {
         setError('');
+        setSuccess('');
         if (revokeReason.trim().length < 10) {
             setError('Alasan request pencabutan minimal 10 karakter.');
-            return;
+            return false;
         }
 
         if (revokeEvidenceFiles.length < 2) {
             setError('Upload minimal 2 gambar bukti untuk request pencabutan.');
+            return false;
+        }
+
+        return true;
+    };
+
+    const handleOpenRevokeConfirm = () => {
+        if (!validateRevokeRequest()) {
+            return;
+        }
+
+        setRevokeConfirmOpen(true);
+    };
+
+    const handleSubmitRevokeRequest = async () => {
+        if (!validateRevokeRequest()) {
             return;
         }
 
@@ -175,9 +195,10 @@ export default function DocumentDetailPage() {
             );
             setRevokeReason('');
             setRevokeEvidenceFiles([]);
+            setRevokeConfirmOpen(false);
             await refreshDetail();
             setError('');
-            window.alert(result.message);
+            setSuccess(result.message);
         } catch (err) {
             setError(normalizeErrorMessage(err));
         } finally {
@@ -191,6 +212,12 @@ export default function DocumentDetailPage() {
                 {error ? (
                     <Alert className="border-red-200 bg-red-50 text-red-800">
                         <AlertDescription>{error}</AlertDescription>
+                    </Alert>
+                ) : null}
+
+                {success ? (
+                    <Alert className="border-emerald-200 bg-emerald-50 text-emerald-800">
+                        <AlertDescription>{success}</AlertDescription>
                     </Alert>
                 ) : null}
 
@@ -371,7 +398,7 @@ export default function DocumentDetailPage() {
                                             </div>
                                             <Button
                                                 className="w-full bg-red-600 hover:bg-red-700"
-                                                onClick={() => void handleSubmitRevokeRequest()}
+                                                onClick={handleOpenRevokeConfirm}
                                                 disabled={submittingRevokeRequest || revokeReason.trim().length < 10 || revokeEvidenceFiles.length < 2}
                                             >
                                                 {submittingRevokeRequest ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
@@ -482,6 +509,40 @@ export default function DocumentDetailPage() {
                         </div>
                     </div>
                 ) : null}
+
+                <Dialog open={revokeConfirmOpen} onOpenChange={setRevokeConfirmOpen}>
+                    <DialogContent className="max-w-[calc(100vw-2rem)] sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Konfirmasi Request Pencabutan</DialogTitle>
+                            <DialogDescription>
+                                Pastikan alasan dan bukti sudah benar sebelum request dikirim ke superadmin.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-3 rounded-xl border border-red-100 bg-red-50 p-4 text-sm text-red-900">
+                            <div>
+                                <p className="text-xs font-bold uppercase tracking-wide text-red-700">Dokumen</p>
+                                <p className="mt-1 font-semibold">{detail?.document.originalFileName ?? detail?.document.finalFileName ?? 'Dokumen final'}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs font-bold uppercase tracking-wide text-red-700">Alasan</p>
+                                <p className="mt-1 whitespace-pre-wrap">{revokeReason.trim()}</p>
+                            </div>
+                            <div>
+                                <p className="text-xs font-bold uppercase tracking-wide text-red-700">Bukti</p>
+                                <p className="mt-1">{revokeEvidenceFiles.length} gambar akan dikirim.</p>
+                            </div>
+                        </div>
+                        <DialogFooter>
+                            <Button variant="outline" className="border-slate-300" onClick={() => setRevokeConfirmOpen(false)} disabled={submittingRevokeRequest}>
+                                Batal
+                            </Button>
+                            <Button className="bg-red-600 hover:bg-red-700" onClick={() => void handleSubmitRevokeRequest()} disabled={submittingRevokeRequest}>
+                                {submittingRevokeRequest ? <Loader2 className="h-4 w-4 animate-spin" /> : <XCircle className="h-4 w-4" />}
+                                Ya, Ajukan Request
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
             </div>
         </AppShell>
     );
